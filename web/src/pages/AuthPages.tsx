@@ -5,6 +5,7 @@ import { api } from "../api";
 import { useAuth } from "../AuthContext";
 import { PasswordInput } from "../components/PasswordInput";
 import { errMessage } from "../helpers/errors";
+import { safeNextPath } from "../helpers/authRedirect";
 
 export function LoginPage() {
   const { setUser } = useAuth();
@@ -22,8 +23,7 @@ export function LoginPage() {
     try {
       const { user } = await api.login({ email, password });
       setUser(user);
-      const next = search.get("next") || "/";
-      navigate(next);
+      navigate(safeNextPath(search.get("next")));
     } catch (err) {
       setError(errMessage(err, "Login failed"));
     } finally {

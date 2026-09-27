@@ -8,26 +8,19 @@ import { config } from "../config";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
-import { canAccessDocument, canManageDocument, canDeleteDocument, requireDocumentAccess, requireMembership, canAccessTrashedDocument, isInternalShareOnlyAccess } from "../services/access";
+import { canAccessDocument, canManageDocument, canDeleteDocument, requireDocumentAccess, requireDocumentManage, requireMembership, canAccessTrashedDocument, canPurgeTrashedDocument, canRestoreTrashedDocument, canManageWorkspaceAsAdmin, isInternalShareOnlyAccess } from "../services/access";
 import { canAccessTrash, canDeleteContent, getPlatformRole } from "../services/platform";
 import { enqueuePurgeJob, type PurgeItem } from "../queue/purgeQueue";
 import { assertUniqueNameAtLevel } from "../services/names";
 import {
-  buildContentUrl,
-  buildBrowserContentUrl,
+  buildOnlyOfficePreviewPayload,
   createContentAccessToken,
-  fileExtension,
-  getOnlyOfficeDocumentType,
-  isImageFile,
-  signOnlyOfficeConfig,
   verifyContentAccessToken,
 } from "../services/onlyoffice";
-import { randomToken } from "../lib/tokens";
-import bcrypt from "bcryptjs";
-import { sendMail } from "../services/mailer";
 import { getStorage } from "../services/storageSettings";
-import { parsePagination, paginationMeta, slicePage } from "../lib/pagination";
+import { parsePagination, slicePage } from "../lib/pagination";
 import { recordAudit, recordAuditOnce } from "../services/audit";
+import { resolveAccessibleWorkspaceIds, resolveTrashedWorkspaces, filterVisibleTrashFolders, filterVisibleTrashDocuments } from "../services/trash";
 
 /** Staging dir: Multer writes here first (not RAM). S3 uploads stream from here then delete. */
 const incomingDir = path.resolve(config.storagePath, ".incoming");
@@ -134,6 +127,7 @@ documentsRouter.get("/:id/content", async (req, res, next) => {
 
 documentsRouter.use(requireAuth);
 
+/** Soft-deleted workspaces / docs / folders visible to the caller. */
 documentsRouter.get("/trash", async (req, res, next) => {
   try {
     const userId = req.user!.id;
@@ -145,32 +139,22 @@ documentsRouter.get("/trash", async (req, res, next) => {
     const q =
       typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
 
-    const memberships = await prisma.workspaceMember.findMany({
-      where: { userId },
-      select: { workspaceId: true },
-    });
-    let workspaceIds = memberships.map((m) => m.workspaceId);
-    if (platformRole === "admin") {
-      const all = await prisma.workspace.findMany({
-        where: { deletedAt: null },
-        select: { id: true },
-      });
-      workspaceIds = all.map((w) => w.id);
-    } else if (platformRole === "owner") {
-      const created = await prisma.workspace.findMany({
-        where: { deletedAt: null, createdById: userId },
-        select: { id: true },
-      });
-      workspaceIds = [...new Set([...workspaceIds, ...created.map((w) => w.id)])];
-    }
+    const workspaceIds = await resolveAccessibleWorkspaceIds(userId, platformRole);
+    const trashedWorkspaces = await resolveTrashedWorkspaces(userId, platformRole);
 
     const [docs, folders] = await Promise.all([
       prisma.document.findMany({
         where: {
           deletedAt: { not: null },
-          OR: [
-            { ownerId: userId },
-            ...(workspaceIds.length ? [{ workspaceId: { in: workspaceIds } }] : []),
+          // Hide contents already covered by a trashed workspace row.
+          OR: [{ workspaceId: null }, { workspace: { deletedAt: null } }],
+          AND: [
+            {
+              OR: [
+                { ownerId: userId },
+                ...(workspaceIds.length ? [{ workspaceId: { in: workspaceIds } }] : []),
+              ],
+            },
           ],
         },
         orderBy: { deletedAt: "desc" },
@@ -195,6 +179,7 @@ documentsRouter.get("/trash", async (req, res, next) => {
             where: {
               deletedAt: { not: null },
               workspaceId: { in: workspaceIds },
+              workspace: { deletedAt: null },
             },
             orderBy: { deletedAt: "desc" },
             select: {
@@ -217,13 +202,25 @@ documentsRouter.get("/trash", async (req, res, next) => {
 
     // Only show the root of a cascaded delete in trash lists
     // not every nested folder/file that was soft-deleted with it.
-    const deletedFolderIds = new Set(folders.map((f) => f.id));
-    const visibleFolders = folders.filter(
-      (f) => !f.parentId || !deletedFolderIds.has(f.parentId),
-    );
-    const visibleDocs = docs.filter(
-      (d) => !d.folderId || !d.folder?.deletedAt,
-    );
+    const visibleFolders = filterVisibleTrashFolders(folders);
+    const visibleDocs = filterVisibleTrashDocuments(docs);
+
+    const workspaceSizeById = new Map<string, number>();
+    if (trashedWorkspaces.length) {
+      const sizes = await prisma.document.groupBy({
+        by: ["workspaceId"],
+        where: {
+          workspaceId: { in: trashedWorkspaces.map((w) => w.id) },
+          deletedAt: { not: null },
+        },
+        _sum: { sizeBytes: true },
+      });
+      for (const row of sizes) {
+        if (row.workspaceId) {
+          workspaceSizeById.set(row.workspaceId, row._sum.sizeBytes ?? 0);
+        }
+      }
+    }
 
     // Build folder paths from live ancestors + name
     const allFoldersForPath = workspaceIds.length
@@ -247,6 +244,19 @@ documentsRouter.get("/trash", async (req, res, next) => {
     }
 
     type TrashRow =
+      | {
+          kind: "workspace";
+          sortAt: number;
+          workspace: {
+            id: string;
+            name: string;
+            createdAt: Date;
+            deletedAt: Date;
+            deletedBy: string;
+            sizeBytes: number;
+            path: string;
+          };
+        }
       | {
           kind: "folder";
           sortAt: number;
@@ -284,6 +294,19 @@ documentsRouter.get("/trash", async (req, res, next) => {
         };
 
     let rows: TrashRow[] = [
+      ...trashedWorkspaces.map((w) => ({
+        kind: "workspace" as const,
+        sortAt: w.deletedAt.getTime(),
+        workspace: {
+          id: w.id,
+          name: w.name,
+          createdAt: w.createdAt,
+          deletedAt: w.deletedAt,
+          deletedBy: w.createdBy.name,
+          sizeBytes: workspaceSizeById.get(w.id) ?? 0,
+          path: w.name,
+        },
+      })),
       ...visibleFolders.map((f) => ({
         kind: "folder" as const,
         sortAt: f.deletedAt?.getTime() ?? 0,
@@ -326,6 +349,12 @@ documentsRouter.get("/trash", async (req, res, next) => {
 
     if (q) {
       rows = rows.filter((row) => {
+        if (row.kind === "workspace") {
+          return (
+            row.workspace.name.toLowerCase().includes(q) ||
+            row.workspace.path.toLowerCase().includes(q)
+          );
+        }
         if (row.kind === "folder") {
           return (
             row.folder.name.toLowerCase().includes(q) ||
@@ -343,6 +372,7 @@ documentsRouter.get("/trash", async (req, res, next) => {
     const { items, meta } = slicePage(rows, page, limit);
 
     res.json({
+      workspaces: items.filter((r) => r.kind === "workspace").map((r) => r.workspace),
       documents: items.filter((r) => r.kind === "doc").map((r) => r.document),
       folders: items.filter((r) => r.kind === "folder").map((r) => r.folder),
       ...meta,
@@ -361,8 +391,10 @@ const bulkPurgeSchema = z.object({
       }),
     )
     .default([]),
+  workspaces: z.array(z.string().min(1)).default([]),
 });
 
+/** Queue permanent delete for selected trash items (workspaces + docs + folders). */
 documentsRouter.post("/trash/purge", async (req, res, next) => {
   try {
     const body = bulkPurgeSchema.parse(req.body ?? {});
@@ -374,29 +406,24 @@ documentsRouter.post("/trash/purge", async (req, res, next) => {
 
     const items: PurgeItem[] = [];
 
+    for (const workspaceId of body.workspaces) {
+      if (!canDeleteContent(platformRole)) continue;
+      if (!(await canManageWorkspaceAsAdmin(workspaceId, userId))) continue;
+      const found = await prisma.workspace.findFirst({
+        where: { id: workspaceId, deletedAt: { not: null } },
+      });
+      if (found) {
+        items.push({ kind: "workspace", workspaceId: found.id });
+      }
+    }
+
     for (const documentId of body.documents) {
       const doc = await prisma.document.findUnique({ where: { id: documentId } });
       if (!doc || !doc.deletedAt) continue;
       const canSee = await canAccessTrashedDocument(doc, userId);
       if (!canSee) continue;
 
-      let canPurge = platformRole === "admin" || doc.ownerId === userId;
-      if (!canPurge && doc.workspaceId) {
-        const membership = await prisma.workspaceMember.findUnique({
-          where: {
-            workspaceId_userId: { workspaceId: doc.workspaceId, userId },
-          },
-        });
-        canPurge = membership?.role === "owner" || membership?.role === "admin";
-        if (!canPurge && platformRole === "owner") {
-          const ws = await prisma.workspace.findFirst({
-            where: { id: doc.workspaceId, createdById: userId, deletedAt: null },
-            select: { id: true },
-          });
-          canPurge = Boolean(ws);
-        }
-      }
-      if (canPurge) {
+      if (await canPurgeTrashedDocument(doc, userId)) {
         items.push({ kind: "document", documentId: doc.id });
       }
     }
@@ -405,10 +432,8 @@ documentsRouter.post("/trash/purge", async (req, res, next) => {
       if (!canDeleteContent(platformRole)) {
         continue;
       }
-      try {
-        await requireMembership(folder.workspaceId, userId, ["owner", "admin"]);
-      } catch {
-        if (platformRole !== "admin") continue;
+      if (!(await canManageWorkspaceAsAdmin(folder.workspaceId, userId))) {
+        continue;
       }
       const found = await prisma.folder.findFirst({
         where: {
@@ -456,16 +481,7 @@ documentsRouter.post("/:id/restore", async (req, res, next) => {
       throw new HttpError(403, "You cannot restore this document");
     }
 
-    let canRestore = doc.ownerId === req.user!.id;
-    if (!canRestore && doc.workspaceId) {
-      const membership = await prisma.workspaceMember.findUnique({
-        where: {
-          workspaceId_userId: { workspaceId: doc.workspaceId, userId: req.user!.id },
-        },
-      });
-      canRestore = membership?.role === "owner" || membership?.role === "admin";
-    }
-    if (!canRestore) {
+    if (!(await canRestoreTrashedDocument(doc, req.user!.id))) {
       throw new HttpError(403, "You cannot restore this document");
     }
 
@@ -504,82 +520,6 @@ documentsRouter.post("/:id/restore", async (req, res, next) => {
         createdAt: restored.createdAt,
       },
     });
-  } catch (err) {
-    next(err);
-  }
-});
-
-documentsRouter.get("/", async (req, res, next) => {
-  try {
-    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
-    const userId = req.user!.id;
-    const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>);
-
-    if (workspaceId) {
-      await requireMembership(workspaceId, userId);
-      const folderParam =
-        typeof req.query.folderId === "string" ? req.query.folderId : undefined;
-      const where = {
-        workspaceId,
-        deletedAt: null as null,
-        ...(folderParam === "root"
-          ? { folderId: null }
-          : folderParam
-            ? { folderId: folderParam }
-            : {}),
-      };
-      const [total, docs] = await Promise.all([
-        prisma.document.count({ where }),
-        prisma.document.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: limit,
-        }),
-      ]);
-      const documents = await Promise.all(
-        docs.map(async (doc) => ({
-          id: doc.id,
-          title: doc.title,
-          filename: doc.filename,
-          mimeType: doc.mimeType,
-          sizeBytes: doc.sizeBytes,
-          ownerId: doc.ownerId,
-          workspaceId: doc.workspaceId,
-          folderId: doc.folderId,
-          createdAt: doc.createdAt,
-          canManage: await canManageDocument(doc, userId),
-          canDelete: await canDeleteDocument(doc, userId),
-        })),
-      );
-      return res.json({ documents, ...paginationMeta(total, page, limit) });
-    }
-
-    const where = { ownerId: userId, workspaceId: null as null, deletedAt: null as null };
-    const [total, docs] = await Promise.all([
-      prisma.document.count({ where }),
-      prisma.document.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
-    const documents = await Promise.all(
-      docs.map(async (doc) => ({
-        id: doc.id,
-        title: doc.title,
-        filename: doc.filename,
-        mimeType: doc.mimeType,
-        sizeBytes: doc.sizeBytes,
-        ownerId: doc.ownerId,
-        workspaceId: doc.workspaceId,
-        createdAt: doc.createdAt,
-        canManage: await canManageDocument(doc, userId),
-        canDelete: await canDeleteDocument(doc, userId),
-      })),
-    );
-    return res.json({ documents, ...paginationMeta(total, page, limit) });
   } catch (err) {
     next(err);
   }
@@ -630,7 +570,6 @@ documentsRouter.post("/", upload.single("file"), async (req, res, next) => {
       workspaceId,
       parentFolderId: folderId,
       name: req.file.originalname,
-      kind: "file",
     });
 
     const storageKey = path.posix.join(
@@ -683,76 +622,21 @@ documentsRouter.post("/", upload.single("file"), async (req, res, next) => {
 documentsRouter.get("/:id/onlyoffice", async (req, res, next) => {
   try {
     const doc = await requireDocumentAccess(req.params.id, req.user!.id);
-    const documentType = getOnlyOfficeDocumentType(doc.filename);
-    const image =
-      isImageFile(doc.filename) || doc.mimeType.startsWith("image/");
-
-    if (!documentType && !image) {
-      throw new HttpError(400, "Preview is not available for this file type");
-    }
-
     const contentToken = createContentAccessToken(doc.id, req.user!.id);
-    const contentUrl = buildContentUrl(doc.id, contentToken);
 
-    if (image) {
-      recordAuditOnce(
-        {
-          actorUserId: req.user!.id,
-          action: "document.previewed",
-          entityType: "document",
-          entityId: doc.id,
-          entityName: doc.title || doc.filename,
-          workspaceId: doc.workspaceId,
-          label: `Viewed Document: ${doc.title || doc.filename}`,
-        },
-        { key: `audit:dedupe:preview:${req.user!.id}:${doc.id}`, ttlSeconds: 60 },
-      );
-      return res.json({
-        mode: "image" as const,
-        documentServerUrl: config.onlyOfficeUrl,
-        title: doc.title || doc.filename,
-        url: buildBrowserContentUrl(doc.id, contentToken),
-        mimeType: doc.mimeType,
-      });
-    }
-
-    const ext = fileExtension(doc.filename);
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       select: { name: true, email: true },
     });
-    const editorConfig = {
-      document: {
-        fileType: ext,
-        key: `blckbox-${doc.id}-${doc.updatedAt.getTime()}`,
-        title: doc.title || doc.filename,
-        url: contentUrl,
-        permissions: {
-          print: false,
-          download: false,
-          edit: false,
-          comment: false,
-        },
-      },
-      editorConfig: {
-        mode: "view" as const,
-        user: {
-          id: req.user!.id,
-          name: user?.name || req.user!.email,
-        },
-        customization: {
-          compactHeader: true,
-          compactToolbar: true,
-          chat: false,
-          help: false,
-          plugins: false,
-          zoom: 100,
-        },
-      },
-      documentType,
-    };
 
-    const token = signOnlyOfficeConfig(editorConfig);
+    const payload = buildOnlyOfficePreviewPayload(doc, {
+      contentToken,
+      documentKey: `blckbox-${doc.id}-${doc.updatedAt.getTime()}`,
+      viewer: {
+        id: req.user!.id,
+        name: user?.name || req.user!.email,
+      },
+    });
 
     recordAuditOnce(
       {
@@ -767,11 +651,7 @@ documentsRouter.get("/:id/onlyoffice", async (req, res, next) => {
       { key: `audit:dedupe:preview:${req.user!.id}:${doc.id}`, ttlSeconds: 60 },
     );
 
-    return res.json({
-      mode: "onlyoffice" as const,
-      documentServerUrl: config.onlyOfficeUrl,
-      config: { ...editorConfig, token },
-    });
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -819,11 +699,11 @@ documentsRouter.get("/:id", async (req, res, next) => {
 
 documentsRouter.put("/:id/rename", async (req, res, next) => {
   try {
-    const doc = await requireDocumentAccess(req.params.id, req.user!.id);
-    const allowed = await canManageDocument(doc, req.user!.id);
-    if (!allowed) {
-      throw new HttpError(403, "You cannot rename this document");
-    }
+    const doc = await requireDocumentManage(
+      req.params.id,
+      req.user!.id,
+      "You cannot rename this document",
+    );
 
     const body = z
       .object({
@@ -852,7 +732,6 @@ documentsRouter.put("/:id/rename", async (req, res, next) => {
         workspaceId: doc.workspaceId,
         parentFolderId: doc.folderId ?? null,
         name: nextName,
-        kind: "file",
         excludeDocumentId: doc.id,
       });
     }
@@ -980,24 +859,7 @@ documentsRouter.delete("/:id/permanent", async (req, res, next) => {
       throw new HttpError(403, "You cannot permanently delete this document");
     }
 
-    const platformRole = await getPlatformRole(req.user!.id);
-    let canPurge = platformRole === "admin" || doc.ownerId === req.user!.id;
-    if (!canPurge && doc.workspaceId) {
-      const membership = await prisma.workspaceMember.findUnique({
-        where: {
-          workspaceId_userId: { workspaceId: doc.workspaceId, userId: req.user!.id },
-        },
-      });
-      canPurge = membership?.role === "owner" || membership?.role === "admin";
-      if (!canPurge && platformRole === "owner") {
-        const ws = await prisma.workspace.findFirst({
-          where: { id: doc.workspaceId, createdById: req.user!.id, deletedAt: null },
-          select: { id: true },
-        });
-        canPurge = Boolean(ws);
-      }
-    }
-    if (!canPurge) {
+    if (!(await canPurgeTrashedDocument(doc, req.user!.id))) {
       throw new HttpError(403, "You cannot permanently delete this document");
     }
 
@@ -1010,150 +872,6 @@ documentsRouter.delete("/:id/permanent", async (req, res, next) => {
       jobId,
       message: "Your delete request has been queued",
     });
-  } catch (err) {
-    next(err);
-  }
-});
-
-const shareSchema = z.object({
-  expiresAt: z.string().datetime(),
-  password: z.string().min(4).max(100).optional().nullable(),
-  email: z.string().email().optional().nullable(),
-  message: z.string().max(2000).optional().default(""),
-});
-
-documentsRouter.post("/:id/share-links", async (req, res, next) => {
-  try {
-    const doc = await requireDocumentAccess(req.params.id, req.user!.id);
-    const allowed = await canManageDocument(doc, req.user!.id);
-    if (!allowed) {
-      throw new HttpError(403, "You cannot share this document");
-    }
-    const body = shareSchema.parse(req.body ?? {});
-    const expiresAt = new Date(body.expiresAt);
-    if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
-      throw new HttpError(400, "Expiry must be in the future");
-    }
-    const token = randomToken(32);
-    const passwordPlain = body.password?.trim() || "";
-    const passwordHash = passwordPlain ? await bcrypt.hash(passwordPlain, 10) : null;
-    const email = body.email?.toLowerCase().trim() || "";
-
-    const link = await prisma.shareLink.create({
-      data: {
-        documentId: doc.id,
-        token,
-        expiresAt,
-        passwordHash,
-        recipientEmail: email,
-        message: body.message ?? "",
-        allowDownload: true,
-        createdById: req.user!.id,
-      },
-    });
-
-    const url = `${config.publicWebUrl}/s/${link.token}`;
-    let emailSent = false;
-    if (email) {
-      const { buildExternalShareEmail } = await import("../services/shareEmails");
-      const sharer = await prisma.user.findUnique({
-        where: { id: req.user!.id },
-        select: { name: true },
-      });
-      const mailContent = buildExternalShareEmail({
-        sharerName: sharer?.name || req.user!.email,
-        documentName: doc.title || doc.filename,
-        expiresAt,
-        url,
-        message: body.message,
-        password: passwordPlain || undefined,
-      });
-      const mail = await sendMail({
-        to: email,
-        subject: mailContent.subject,
-        text: mailContent.text,
-        html: mailContent.html,
-      });
-      emailSent = mail.sent;
-    }
-
-    res.status(201).json({
-      shareLink: {
-        id: link.id,
-        token: link.token,
-        url,
-        expiresAt: link.expiresAt,
-        hasPassword: Boolean(link.passwordHash),
-        createdAt: link.createdAt,
-        emailSent,
-      },
-    });
-
-    recordAudit({
-      actorUserId: req.user!.id,
-      action: "document.shared",
-      entityType: "document",
-      entityId: doc.id,
-      entityName: doc.title || doc.filename,
-      workspaceId: doc.workspaceId,
-      label: `Created External Share for ${doc.title || doc.filename}`,
-      metadata: { kind: "external", recipients: email ? [email] : [], shareLinkId: link.id },
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-documentsRouter.get("/:id/share-links", async (req, res, next) => {
-  try {
-    await requireDocumentAccess(req.params.id, req.user!.id);
-    const links = await prisma.shareLink.findMany({
-      where: { documentId: req.params.id, revokedAt: null },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json({
-      shareLinks: links.map((l) => ({
-        id: l.id,
-        token: l.token,
-        url: `${config.publicWebUrl}/s/${l.token}`,
-        expiresAt: l.expiresAt,
-        hasPassword: Boolean(l.passwordHash),
-        createdAt: l.createdAt,
-      })),
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-documentsRouter.delete("/share-links/:linkId", async (req, res, next) => {
-  try {
-    const link = await prisma.shareLink.findUnique({
-      where: { id: req.params.linkId },
-      include: { document: true },
-    });
-    if (!link || link.revokedAt) {
-      throw new HttpError(404, "Share link not found");
-    }
-    const allowed = await canManageDocument(link.document, req.user!.id);
-    if (!allowed) {
-      throw new HttpError(403, "You cannot revoke this share link");
-    }
-    await prisma.shareLink.update({
-      where: { id: link.id },
-      data: { revokedAt: new Date() },
-    });
-    recordAudit({
-      actorUserId: req.user!.id,
-      action: "document.share_revoked",
-      entityType: "document",
-      entityId: link.document.id,
-      entityName: link.document.title || link.document.filename,
-      workspaceId: link.document.workspaceId,
-      label: `Revoked Document Share: ${link.document.title || link.document.filename}`,
-      metadata: { kind: "external", shareId: link.id },
-    });
-    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

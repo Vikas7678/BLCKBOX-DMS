@@ -123,6 +123,16 @@ export type TrashFolderItem = FolderItem & {
   workspaceName: string;
 };
 
+export type TrashWorkspaceItem = {
+  id: string;
+  name: string;
+  createdAt: string;
+  deletedAt: string;
+  deletedBy: string;
+  path: string;
+  sizeBytes: number;
+};
+
 export type OnlyOfficePreviewPayload =
   | {
       mode: "onlyoffice";

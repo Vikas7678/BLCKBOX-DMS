@@ -9,16 +9,10 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
-import { config } from "../config";
 import { getStorage } from "../services/storageSettings";
 import {
-  buildBrowserContentUrl,
-  buildContentUrl,
+  buildOnlyOfficePreviewPayload,
   createShareContentAccessToken,
-  fileExtension,
-  getOnlyOfficeDocumentType,
-  isImageFile,
-  signOnlyOfficeConfig,
 } from "../services/onlyoffice";
 import { recordAuditOnce } from "../services/audit";
 
@@ -235,13 +229,6 @@ sharePublicRouter.get("/:token/preview", async (req, res, next) => {
       throw new HttpError(404, "Document is not part of this share");
     }
 
-    const documentType = getOnlyOfficeDocumentType(doc.filename);
-    const image = isImageFile(doc.filename) || doc.mimeType.startsWith("image/");
-
-    if (!documentType && !image) {
-      throw new HttpError(400, "Preview is not available for this file type");
-    }
-
     recordAuditOnce(
       {
         actorUserId: link.createdById,
@@ -258,56 +245,15 @@ sharePublicRouter.get("/:token/preview", async (req, res, next) => {
     );
 
     const contentToken = createShareContentAccessToken(doc.id, link.token);
-    const contentUrl = buildContentUrl(doc.id, contentToken);
-
-    if (image) {
-      return res.json({
-        mode: "image" as const,
-        documentServerUrl: config.onlyOfficeUrl,
-        title: doc.title || doc.filename,
-        url: buildBrowserContentUrl(doc.id, contentToken),
-        mimeType: doc.mimeType,
-      });
-    }
-
-    const ext = fileExtension(doc.filename);
-    const editorConfig = {
-      document: {
-        fileType: ext,
-        key: `blckbox-share-${doc.id}-${doc.updatedAt.getTime()}`,
-        title: doc.title || doc.filename,
-        url: contentUrl,
-        permissions: {
-          print: false,
-          download: false,
-          edit: false,
-          comment: false,
-        },
+    const payload = buildOnlyOfficePreviewPayload(doc, {
+      contentToken,
+      documentKey: `blckbox-share-${doc.id}-${doc.updatedAt.getTime()}`,
+      viewer: {
+        id: `share-${link.token.slice(0, 8)}`,
+        name: "Guest",
       },
-      editorConfig: {
-        mode: "view" as const,
-        user: {
-          id: `share-${link.token.slice(0, 8)}`,
-          name: "Guest",
-        },
-        customization: {
-          compactHeader: true,
-          compactToolbar: true,
-          chat: false,
-          help: false,
-          plugins: false,
-          zoom: 100,
-        },
-      },
-      documentType,
-    };
-
-    const ooToken = signOnlyOfficeConfig(editorConfig);
-    return res.json({
-      mode: "onlyoffice" as const,
-      documentServerUrl: config.onlyOfficeUrl,
-      config: { ...editorConfig, token: ooToken },
     });
+    return res.json(payload);
   } catch (err) {
     next(err);
   }

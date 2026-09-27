@@ -15,6 +15,9 @@ export type AuditAction =
   | "folder.restored"
   | "folder.deleted"
   | "workspace.created"
+  | "workspace.trashed"
+  | "workspace.restored"
+  | "workspace.deleted"
   | "workspace.member_added"
   | "workspace.member_removed"
   | "workspace.member_role_changed"
@@ -52,6 +55,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "folder.restored": "Folder restored from trashcan",
   "folder.deleted": "Folder permanently deleted",
   "workspace.created": "Created Workspace",
+  "workspace.trashed": "Workspace moved to trashcan",
+  "workspace.restored": "Workspace restored from trashcan",
+  "workspace.deleted": "Workspace permanently deleted",
   "workspace.member_added": "Permission Granted",
   "workspace.member_removed": "Permission Revoked",
   "workspace.member_role_changed": "Role Updated",
@@ -79,6 +85,9 @@ export const AUDIT_ACTION_PHRASES: Record<AuditAction, string> = {
   "folder.restored": "restored",
   "folder.deleted": "permanently deleted",
   "workspace.created": "created",
+  "workspace.trashed": "moved to trash",
+  "workspace.restored": "restored",
+  "workspace.deleted": "permanently deleted",
   "workspace.member_added": "permission granted",
   "workspace.member_removed": "permission revoked",
   "workspace.member_role_changed": "role updated",

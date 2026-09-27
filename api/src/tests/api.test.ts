@@ -100,11 +100,14 @@ describe("API authz and sharing", () => {
     const docId = upload.body.document.id as string;
 
     const openLink = await request(app)
-      .post(`/api/documents/${docId}/share-links`)
+      .post(`/api/shares/documents/${docId}/external`)
       .set("Cookie", a.cookie)
-      .send({ expiresAt: new Date(Date.now() + 86400000).toISOString() });
+      .send({
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        allowDownload: true,
+      });
     expect(openLink.status).toBe(201);
-    const openToken = openLink.body.shareLink.token as string;
+    const openToken = openLink.body.share.token as string;
 
     const openMeta = await request(app).get(`/api/s/${openToken}`);
     expect(openMeta.status).toBe(200);
@@ -115,14 +118,15 @@ describe("API authz and sharing", () => {
     expect(openDl.text).toBe("shared");
 
     const locked = await request(app)
-      .post(`/api/documents/${docId}/share-links`)
+      .post(`/api/shares/documents/${docId}/external`)
       .set("Cookie", a.cookie)
       .send({
         password: "secret1",
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        allowDownload: true,
       });
     expect(locked.status).toBe(201);
-    const lockedToken = locked.body.shareLink.token as string;
+    const lockedToken = locked.body.share.token as string;
 
     const needsPw = await request(app).get(`/api/s/${lockedToken}`);
     expect(needsPw.body.share.needsPassword).toBe(true);
@@ -138,7 +142,7 @@ describe("API authz and sharing", () => {
     expect(lockedDl.status).toBe(200);
 
     await request(app)
-      .delete(`/api/documents/share-links/${openLink.body.shareLink.id}`)
+      .delete(`/api/shares/external/${openLink.body.share.id}`)
       .set("Cookie", a.cookie);
     const revoked = await request(app).get(`/api/s/${openToken}`);
     expect(revoked.status).toBe(404);

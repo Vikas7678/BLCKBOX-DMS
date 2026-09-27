@@ -1,6 +1,9 @@
 /**
  * Authenticated sharing APIs (`/api/shares/...`): internal user shares, external links, mine / with-me.
  * Public token unlock/download is in `share.ts` (sharePublicRouter).
+ *
+ * Create/revoke require document manage (workspace membership owner|admin, doc owner, etc.).
+ * Membership role "owner" is not the same as workspace creator (`createdById`).
  */
 import { Router } from "express";
 import bcrypt from "bcryptjs";
@@ -9,30 +12,17 @@ import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
 import { config } from "../config";
-import { canManageDocument, requireDocumentAccess } from "../services/access";
+import { canManageDocument, requireDocumentManage } from "../services/access";
 import { sendMail } from "../services/mailer";
 import { buildExternalShareEmail, buildInternalShareEmail } from "../services/shareEmails";
+import { searchActiveUsers } from "../services/userSearch";
 import { randomToken } from "../lib/tokens";
 import { parsePagination, paginationMeta, slicePage } from "../lib/pagination";
+import { parseRequiredExpiry } from "../lib/dates";
 import { recordAudit } from "../services/audit";
 
 export const sharesRouter = Router();
 sharesRouter.use(requireAuth);
-
-function parseRequiredExpiry(raw: string): Date {
-  const expiresAt = new Date(raw);
-  if (Number.isNaN(expiresAt.getTime())) {
-    throw new HttpError(400, "Invalid expiry date");
-  }
-  if (expiresAt.getTime() <= Date.now()) {
-    throw new HttpError(400, "Expiry must be in the future");
-  }
-  const max = Date.now() + 365 * 24 * 60 * 60 * 1000;
-  if (expiresAt.getTime() > max) {
-    throw new HttpError(400, "Expiry cannot be more than 365 days from now");
-  }
-  return expiresAt;
-}
 
 const internalSchema = z.object({
   userId: z.string().min(1),
@@ -76,23 +66,10 @@ const externalEmailSchema = z.object({
 sharesRouter.get("/users/search", async (req, res, next) => {
   try {
     const q = String(req.query.q ?? "").trim();
-    const users = await prisma.user.findMany({
-      where: {
-        deletedAt: null,
-        disabledAt: null,
-        id: { not: req.user!.id },
-        ...(q.length >= 1
-          ? {
-              OR: [
-                { email: { contains: q, mode: "insensitive" as const } },
-                { name: { contains: q, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
-      },
-      select: { id: true, email: true, name: true },
+    const users = await searchActiveUsers({
+      q,
+      excludeIds: [req.user!.id],
       take: q.length >= 1 ? 20 : 50,
-      orderBy: { name: "asc" },
     });
     res.json({ users });
   } catch (err) {
@@ -102,11 +79,7 @@ sharesRouter.get("/users/search", async (req, res, next) => {
 
 sharesRouter.post("/documents/:id/internal", async (req, res, next) => {
   try {
-    const doc = await requireDocumentAccess(req.params.id, req.user!.id);
-    const allowed = await canManageDocument(doc, req.user!.id);
-    if (!allowed) {
-      throw new HttpError(403, "You cannot share this document");
-    }
+    const doc = await requireDocumentManage(req.params.id, req.user!.id);
     const body = internalSchema.parse(req.body ?? {});
     const expiresAt = parseRequiredExpiry(body.expiresAt);
     if (body.userId === req.user!.id) {
@@ -191,11 +164,7 @@ sharesRouter.post("/documents/:id/internal", async (req, res, next) => {
 
 sharesRouter.post("/documents/:id/external", async (req, res, next) => {
   try {
-    const doc = await requireDocumentAccess(req.params.id, req.user!.id);
-    const allowed = await canManageDocument(doc, req.user!.id);
-    if (!allowed) {
-      throw new HttpError(403, "You cannot share this document");
-    }
+    const doc = await requireDocumentManage(req.params.id, req.user!.id);
     const body = externalSchema.parse(req.body ?? {});
     const expiresAt = parseRequiredExpiry(body.expiresAt);
     const recipients = [
@@ -300,10 +269,11 @@ sharesRouter.post("/batch/internal", async (req, res, next) => {
 
     const docs = [];
     for (const id of documentIds) {
-      const doc = await requireDocumentAccess(id, req.user!.id);
-      if (!(await canManageDocument(doc, req.user!.id))) {
-        throw new HttpError(403, `You cannot share ${doc.title || doc.filename}`);
-      }
+      const doc = await requireDocumentManage(
+        id,
+        req.user!.id,
+        `You cannot share this document`,
+      );
       docs.push(doc);
     }
 
@@ -343,7 +313,7 @@ sharesRouter.post("/batch/internal", async (req, res, next) => {
     const url =
       docs.length === 1
         ? `${config.publicWebUrl}/preview/${docs[0].id}`
-        : `${config.publicWebUrl}/shared-with-me`;
+        : `${config.publicWebUrl}/shares/with-me`;
     const mailContent = buildInternalShareEmail({
       sharerName: sharer?.name || req.user!.email,
       documentName: names,
@@ -409,10 +379,7 @@ sharesRouter.post("/batch/external", async (req, res, next) => {
 
     const docs = [];
     for (const id of documentIds) {
-      const doc = await requireDocumentAccess(id, req.user!.id);
-      if (!(await canManageDocument(doc, req.user!.id))) {
-        throw new HttpError(403, `You cannot share ${doc.title || doc.filename}`);
-      }
+      const doc = await requireDocumentManage(id, req.user!.id);
       docs.push(doc);
     }
 

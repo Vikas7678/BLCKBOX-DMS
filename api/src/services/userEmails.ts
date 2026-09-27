@@ -1,10 +1,4 @@
-function escapeHtml(text: string): string {
-  return String(text || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+import { escapeHtml } from "../lib/html";
 
 function roleLabel(role: string): string {
   if (role === "admin") return "Admin";

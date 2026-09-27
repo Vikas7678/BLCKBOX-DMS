@@ -1,5 +1,11 @@
+/**
+ * OnlyOffice / image preview helpers.
+ * Routes should use buildOnlyOfficePreviewPayload + content-token helpers;
+ * type/ext helpers stay file-private.
+ */
 import jwt from "jsonwebtoken";
 import { config } from "../config";
+import { HttpError } from "../middleware/error";
 
 const WORD = new Set([
   "doc",
@@ -21,13 +27,13 @@ const SLIDE = new Set(["ppt", "pptx", "pptm", "pps", "ppsx", "odp"]);
 const PDF = new Set(["pdf"]);
 const IMAGE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 
-export function fileExtension(filename: string): string {
+function fileExtension(filename: string): string {
   const i = filename.lastIndexOf(".");
   if (i < 0 || i === filename.length - 1) return "";
   return filename.slice(i + 1).toLowerCase();
 }
 
-export function getOnlyOfficeDocumentType(
+function getOnlyOfficeDocumentType(
   filename: string,
 ): "word" | "cell" | "slide" | "pdf" | null {
   const ext = fileExtension(filename);
@@ -38,15 +44,18 @@ export function getOnlyOfficeDocumentType(
   return null;
 }
 
-export function isImageFile(filename: string): boolean {
+function isImageFile(filename: string): boolean {
   return IMAGE.has(fileExtension(filename));
 }
 
-export function canPreviewFile(filename: string): boolean {
-  return isImageFile(filename) || getOnlyOfficeDocumentType(filename) !== null;
+function canPreviewFile(filename: string, mimeType?: string): boolean {
+  if (isImageFile(filename) || (mimeType?.startsWith("image/") ?? false)) {
+    return true;
+  }
+  return getOnlyOfficeDocumentType(filename) !== null;
 }
 
-export function signOnlyOfficeConfig(configPayload: Record<string, unknown>): string {
+function signOnlyOfficeConfig(configPayload: Record<string, unknown>): string {
   return jwt.sign(
     {
       ...configPayload,
@@ -55,6 +64,103 @@ export function signOnlyOfficeConfig(configPayload: Record<string, unknown>): st
     },
     config.onlyOfficeJwtSecret,
   );
+}
+
+function buildContentUrl(documentId: string, contentToken: string): string {
+  const base = config.publicApiUrl.replace(/\/$/, "");
+  return `${base}/documents/${documentId}/content?token=${encodeURIComponent(contentToken)}`;
+}
+
+/** Same content endpoint, but reachable from the browser (not Docker-only host). */
+function buildBrowserContentUrl(documentId: string, contentToken: string): string {
+  const base = config.browserApiUrl.replace(/\/$/, "");
+  return `${base}/documents/${documentId}/content?token=${encodeURIComponent(contentToken)}`;
+}
+
+export type PreviewDoc = {
+  id: string;
+  filename: string;
+  title: string;
+  mimeType: string;
+  updatedAt: Date;
+};
+
+export type OnlyOfficePreviewPayload =
+  | {
+      mode: "image";
+      documentServerUrl: string;
+      title: string;
+      url: string;
+      mimeType: string;
+    }
+  | {
+      mode: "onlyoffice";
+      documentServerUrl: string;
+      config: Record<string, unknown>;
+    };
+
+/** Build image or OnlyOffice viewer payload; throws HttpError(400) if type unsupported. */
+export function buildOnlyOfficePreviewPayload(
+  doc: PreviewDoc,
+  opts: {
+    contentToken: string;
+    documentKey: string;
+    viewer: { id: string; name: string };
+  },
+): OnlyOfficePreviewPayload {
+  const image = isImageFile(doc.filename) || doc.mimeType.startsWith("image/");
+  const documentType = getOnlyOfficeDocumentType(doc.filename);
+
+  if (!canPreviewFile(doc.filename, doc.mimeType) || (!image && !documentType)) {
+    throw new HttpError(400, "Preview is not available for this file type");
+  }
+
+  if (image) {
+    return {
+      mode: "image",
+      documentServerUrl: config.onlyOfficeUrl,
+      title: doc.title || doc.filename,
+      url: buildBrowserContentUrl(doc.id, opts.contentToken),
+      mimeType: doc.mimeType,
+    };
+  }
+
+  const contentUrl = buildContentUrl(doc.id, opts.contentToken);
+  const ext = fileExtension(doc.filename);
+  const editorConfig = {
+    document: {
+      fileType: ext,
+      key: opts.documentKey,
+      title: doc.title || doc.filename,
+      url: contentUrl,
+      permissions: {
+        print: false,
+        download: false,
+        edit: false,
+        comment: false,
+      },
+    },
+    editorConfig: {
+      mode: "view" as const,
+      user: opts.viewer,
+      customization: {
+        compactHeader: true,
+        compactToolbar: true,
+        chat: false,
+        help: false,
+        plugins: false,
+        zoom: 100,
+      },
+    },
+    documentType,
+  };
+
+  const token = signOnlyOfficeConfig(editorConfig);
+  return {
+    mode: "onlyoffice",
+    documentServerUrl: config.onlyOfficeUrl,
+    config: { ...editorConfig, token },
+  };
 }
 
 export function createContentAccessToken(documentId: string, userId: string): string {
@@ -101,15 +207,4 @@ export function verifyContentAccessToken(token: string): {
     userId: payload.userId,
     shareToken: payload.shareToken,
   };
-}
-
-export function buildContentUrl(documentId: string, contentToken: string): string {
-  const base = config.publicApiUrl.replace(/\/$/, "");
-  return `${base}/documents/${documentId}/content?token=${encodeURIComponent(contentToken)}`;
-}
-
-/** Same content endpoint, but reachable from the browser (not Docker-only host). */
-export function buildBrowserContentUrl(documentId: string, contentToken: string): string {
-  const base = config.browserApiUrl.replace(/\/$/, "");
-  return `${base}/documents/${documentId}/content?token=${encodeURIComponent(contentToken)}`;
 }

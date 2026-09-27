@@ -1,9 +1,8 @@
-import { PlatformRole, User } from "@prisma/client";
+import { PlatformRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/error";
 
-export type PlatformUser = Pick<User, "id" | "platformRole">;
-
+/** Load platform role; rejects deleted/disabled accounts. */
 export async function getPlatformRole(userId: string): Promise<PlatformRole> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -18,24 +17,13 @@ export async function getPlatformRole(userId: string): Promise<PlatformRole> {
   return user.platformRole;
 }
 
-export function isPlatformAdmin(role: PlatformRole): boolean {
-  return role === "admin";
-}
-
-export function isPlatformOwner(role: PlatformRole): boolean {
-  return role === "owner";
-}
-
-export function isPlatformMember(role: PlatformRole): boolean {
-  return role === "member";
-}
-
-export function canAccessSettings(role: PlatformRole): boolean {
-  return role === "admin";
+/** Platform admin or platform owner (not workspace membership role). */
+function isAdminOrOwner(role: PlatformRole): boolean {
+  return role === "admin" || role === "owner";
 }
 
 export function canAccessUsersPage(role: PlatformRole): boolean {
-  return role === "admin" || role === "owner";
+  return isAdminOrOwner(role);
 }
 
 export function canManageUsers(role: PlatformRole): boolean {
@@ -43,18 +31,18 @@ export function canManageUsers(role: PlatformRole): boolean {
 }
 
 export function canCreateWorkspace(role: PlatformRole): boolean {
-  return role === "admin" || role === "owner";
+  return isAdminOrOwner(role);
 }
 
 export function canAccessTrash(role: PlatformRole): boolean {
-  return role === "admin" || role === "owner";
+  return isAdminOrOwner(role);
 }
 
 export function canDeleteContent(role: PlatformRole): boolean {
-  return role === "admin" || role === "owner";
+  return isAdminOrOwner(role);
 }
 
-export async function requirePlatformRole(
+async function requirePlatformRole(
   userId: string,
   allowed: PlatformRole[],
   message = "Insufficient permissions",

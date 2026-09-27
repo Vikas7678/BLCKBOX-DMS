@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { ChevronDown, Folder, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
+import { ChevronDown, Folder, FolderKanban, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 import { api } from "../api";
-import type { TrashDocumentItem, TrashFolderItem } from "../api";
+import type { TrashDocumentItem, TrashFolderItem, TrashWorkspaceItem } from "../api";
 import { useAuth } from "../AuthContext";
 import { canAccessTrash } from "../permissions";
 import { usePurgeSettledRefresh } from "../realtime";
 import { confirmDanger } from "../alertify";
 import { toast } from "../toast";
 import { PaginationBar } from "../components/PaginationBar";
-import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
+import { emptyMeta, type PaginationMeta, toPaginationMeta } from "../pagination";
 import emptyTrashImg from "../assets/empty-trash.svg";
 import { errMessage } from "../helpers/errors";
 import { formatDate } from "../helpers/date";
@@ -21,19 +21,25 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-
 type TrashRow =
+  | { kind: "workspace"; item: TrashWorkspaceItem }
   | { kind: "folder"; item: TrashFolderItem }
   | { kind: "doc"; item: TrashDocumentItem };
 
-type SelectionKey = `doc:${string}` | `folder:${string}`;
+type SelectionKey = `doc:${string}` | `folder:${string}` | `workspace:${string}`;
 
+function rowKey(row: TrashRow): SelectionKey {
+  if (row.kind === "workspace") return `workspace:${row.item.id}`;
+  if (row.kind === "folder") return `folder:${row.item.id}`;
+  return `doc:${row.item.id}`;
+}
 
 export function TrashPage() {
   const { user } = useAuth();
   const allowed = canAccessTrash(user?.platformRole);
   const [docs, setDocs] = useState<TrashDocumentItem[]>([]);
   const [folders, setFolders] = useState<TrashFolderItem[]>([]);
+  const [workspaces, setWorkspaces] = useState<TrashWorkspaceItem[]>([]);
   const [meta, setMeta] = useState<PaginationMeta>(emptyMeta());
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("");
@@ -50,6 +56,7 @@ export function TrashPage() {
     const res = await api.listTrash({ page: p, q });
     setDocs(res.documents);
     setFolders(res.folders);
+    setWorkspaces(res.workspaces ?? []);
     setMeta(toPaginationMeta(res));
   }
 
@@ -82,21 +89,14 @@ export function TrashPage() {
 
   const rows = useMemo(() => {
     const all: TrashRow[] = [
+      ...workspaces.map((item) => ({ kind: "workspace" as const, item })),
       ...folders.map((item) => ({ kind: "folder" as const, item })),
       ...docs.map((item) => ({ kind: "doc" as const, item })),
     ];
     return all;
-  }, [docs, folders]);
+  }, [docs, folders, workspaces]);
 
-  const allKeys = useMemo(
-    () =>
-      rows.map((row) =>
-        row.kind === "folder"
-          ? (`folder:${row.item.id}` as SelectionKey)
-          : (`doc:${row.item.id}` as SelectionKey),
-      ),
-    [rows],
-  );
+  const allKeys = useMemo(() => rows.map(rowKey), [rows]);
 
   const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
   const someSelected = selected.size > 0;
@@ -158,6 +158,19 @@ export function TrashPage() {
     }
   }
 
+  async function restoreWorkspace(id: string) {
+    setBusyId(id);
+    try {
+      await api.restoreWorkspace(id);
+      toast.success("Workspace restored");
+      await load();
+    } catch (err) {
+      toast.error(errMessage(err, "Restore failed"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function purgeDoc(id: string) {
     confirmDanger("Permanently delete this file? This cannot be undone.", () => {
       void (async () => {
@@ -202,17 +215,42 @@ export function TrashPage() {
     });
   }
 
+  function purgeWorkspace(id: string) {
+    confirmDanger(
+      "Permanently delete this workspace and all of its files? This cannot be undone.",
+      () => {
+        void (async () => {
+          setBusyId(id);
+          try {
+            const res = await api.purgeWorkspace(id);
+            toast.info(res.message || "Your delete request has been queued");
+            await load();
+            setSelected((prev) => {
+              const next = new Set(prev);
+              next.delete(`workspace:${id}`);
+              return next;
+            });
+          } catch (err) {
+            toast.error(errMessage(err, "Delete failed"));
+          } finally {
+            setBusyId(null);
+          }
+        })();
+      },
+    );
+  }
+
   function restoreSelection() {
     setBulkOpen(false);
-    const selectedRows = rows.filter((row) =>
-      selected.has(row.kind === "folder" ? `folder:${row.item.id}` : `doc:${row.item.id}`),
-    );
+    const selectedRows = rows.filter((row) => selected.has(rowKey(row)));
     if (!selectedRows.length) return;
     void (async () => {
       setBusyId("bulk");
       try {
         for (const row of selectedRows) {
-          if (row.kind === "folder") {
+          if (row.kind === "workspace") {
+            await api.restoreWorkspace(row.item.id);
+          } else if (row.kind === "folder") {
             await api.restoreFolder(row.item.workspaceId, row.item.id);
           } else {
             await api.restoreDocument(row.item.id);
@@ -231,9 +269,7 @@ export function TrashPage() {
 
   function deleteSelection() {
     setBulkOpen(false);
-    const selectedRows = rows.filter((row) =>
-      selected.has(row.kind === "folder" ? `folder:${row.item.id}` : `doc:${row.item.id}`),
-    );
+    const selectedRows = rows.filter((row) => selected.has(rowKey(row)));
     if (!selectedRows.length) return;
     confirmDanger(
       `Permanently delete ${selectedRows.length} item(s)? This cannot be undone.`,
@@ -250,7 +286,10 @@ export function TrashPage() {
                 workspaceId: r.item.workspaceId,
                 folderId: r.item.id,
               }));
-            const res = await api.purgeTrashItems({ documents, folders });
+            const workspaces = selectedRows
+              .filter((r) => r.kind === "workspace")
+              .map((r) => r.item.id);
+            const res = await api.purgeTrashItems({ documents, folders, workspaces });
             toast.info(res.message || "Your delete request has been queued");
             setSelected(new Set());
             await load();
@@ -273,7 +312,9 @@ export function TrashPage() {
       <header className="page-header">
         <div>
           <h1>Trash</h1>
-          <p className="muted">Soft-deleted files and folders. Restore or permanently delete.</p>
+          <p className="muted">
+            Soft-deleted workspaces, files, and folders. Restore or permanently delete.
+          </p>
         </div>
       </header>
 
@@ -282,10 +323,10 @@ export function TrashPage() {
           <Search size={16} aria-hidden />
           <input
             type="search"
-            placeholder="Search by filename"
+            placeholder="Search by name"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            aria-label="Search by filename"
+            aria-label="Search by name"
           />
         </form>
         <div className="trash-toolbar-right">
@@ -341,7 +382,7 @@ export function TrashPage() {
           <p className="empty-folder-sub">
             {appliedQ
               ? "Try a different search."
-              : "There are no files or folders in trash."}
+              : "There are no workspaces, files, or folders in trash."}
           </p>
         </div>
       ) : (
@@ -366,6 +407,56 @@ export function TrashPage() {
             </thead>
             <tbody>
               {rows.map((row) => {
+                if (row.kind === "workspace") {
+                  const w = row.item;
+                  const key: SelectionKey = `workspace:${w.id}`;
+                  return (
+                    <tr key={key} className={selected.has(key) ? "is-selected" : undefined}>
+                      <td className="col-check">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(key)}
+                          onChange={() => toggleKey(key)}
+                          aria-label={`Select workspace ${w.name}`}
+                        />
+                      </td>
+                      <td>
+                        <div className="trash-item">
+                          <FolderKanban size={28} className="file-type-folder" aria-hidden />
+                          <div>
+                            <div className="file-name-link">{w.name}</div>
+                            <div className="trash-path">Workspace</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="muted">{formatBytes(w.sizeBytes)}</td>
+                      <td className="muted">{formatDate(w.deletedAt)}</td>
+                      <td className="muted">{w.deletedBy}</td>
+                      <td className="col-trash-actions">
+                        <button
+                          type="button"
+                          className="trash-action"
+                          disabled={busyId === w.id || busyId === "bulk"}
+                          onClick={() => void restoreWorkspace(w.id)}
+                        >
+                          Restore
+                        </button>
+                        <span className="trash-action-sep" aria-hidden>
+                          |
+                        </span>
+                        <button
+                          type="button"
+                          className="trash-action"
+                          disabled={busyId === w.id || busyId === "bulk"}
+                          onClick={() => purgeWorkspace(w.id)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+
                 if (row.kind === "folder") {
                   const f = row.item;
                   const key: SelectionKey = `folder:${f.id}`;

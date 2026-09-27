@@ -3,28 +3,22 @@
  * Upload-with-progress uses XHR because fetch has no upload progress events.
  */
 import type { PaginationMeta } from "../pagination";
-import { DEFAULT_PAGE_LIMIT } from "../pagination";
 import { API_URL, listQuery, request, type ListParams } from "./client";
 import type {
   DocumentItem,
   OnlyOfficePreviewPayload,
   TrashDocumentItem,
   TrashFolderItem,
+  TrashWorkspaceItem,
 } from "./types";
 
 export const documentsApi = {
-  listDocuments: (workspaceId: string, folderId?: string | null, params?: ListParams) => {
-    const sp = new URLSearchParams({ workspaceId });
-    sp.set("folderId", folderId || "root");
-    sp.set("page", String(params?.page ?? 1));
-    sp.set("limit", String(params?.limit ?? DEFAULT_PAGE_LIMIT));
-    return request<{ documents: DocumentItem[] } & PaginationMeta>(`/documents?${sp.toString()}`);
-  },
   listTrash: (params?: ListParams) =>
     request<
       {
         documents: TrashDocumentItem[];
         folders: TrashFolderItem[];
+        workspaces: TrashWorkspaceItem[];
       } & PaginationMeta
     >(`/documents/trash?${listQuery(params)}`),
   uploadDocument: async (
@@ -91,6 +85,7 @@ export const documentsApi = {
   purgeTrashItems: (body: {
     documents: string[];
     folders: { workspaceId: string; folderId: string }[];
+    workspaces?: string[];
   }) =>
     request<{ queued: boolean; jobId: string; count: number; message: string }>(
       "/documents/trash/purge",

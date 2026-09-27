@@ -1,10 +1,4 @@
-function escapeHtml(text: string): string {
-  return String(text || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+import { escapeHtml } from "../lib/html";
 
 function formatExpiry(iso: Date | string): string {
   const d = iso instanceof Date ? iso : new Date(iso);

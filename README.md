@@ -195,9 +195,10 @@ The app does **not** require SMTP for the happy path; links can be copied. Optio
 - `POST /api/auth/login|logout`, `GET /api/auth/me` (public register disabled)
 - `GET/POST /api/users` (admin), platform role / disable / enable
 - `GET /api/dashboard` (stats + scoped recent activity)
-- `GET/POST /api/documents`, download, OnlyOffice, share-links
+- `POST /api/documents`, download, trash, OnlyOffice preview
 - `GET/POST /api/workspaces`, members, invitations, folders, contents
 - `GET/POST /api/shares/...` (internal / external / mine / with-me)
+
 - `GET /api/audit-trails/documents/:id`
 - `GET /api/invites/:token`, `POST /api/invites/:token/accept`
 - `GET /api/s/:token`, `POST /api/s/:token/unlock`, `GET /api/s/:token/download`

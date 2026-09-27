@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Download, Ellipsis, Link2Off } from "lucide-react";
 import { api } from "../api";
 import type { OnlyOfficePreviewPayload } from "../api";
@@ -8,6 +8,7 @@ import { OnlyOfficePreviewer } from "../components/OnlyOfficePreviewer";
 import { PreviewErrorBoundary } from "../components/PreviewErrorBoundary";
 import { PasswordInput } from "../components/PasswordInput";
 import { errMessage } from "../helpers/errors";
+import { loginWithNext } from "../helpers/authRedirect";
 
 function formatShareExpiry(expiresAt: string | undefined | null): string {
   if (!expiresAt) return "";
@@ -129,6 +130,7 @@ function ShareToolbar({
   showBack?: boolean;
   onBack?: () => void;
 }) {
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -204,7 +206,7 @@ function ShareToolbar({
         ) : null}
 
         <Link
-          to="/login"
+          to={loginWithNext(`${location.pathname}${location.search}`)}
           className="external-share-viewer__pill-btn external-share-viewer__pill-btn--primary"
         >
           Log in

@@ -1,5 +1,8 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/error";
+
+type DbClient = Prisma.TransactionClient | typeof prisma;
 
 function normalizeName(name: string) {
   return name.trim().toLowerCase();
@@ -9,14 +12,16 @@ function normalizeName(name: string) {
  * Ensures no non-deleted file or folder already uses this name
  * at the same workspace level (root or under the same parent folder).
  */
-export async function assertUniqueNameAtLevel(opts: {
-  workspaceId: string;
-  parentFolderId: string | null;
-  name: string;
-  kind: "file" | "folder";
-  excludeDocumentId?: string;
-  excludeFolderId?: string;
-}) {
+export async function assertUniqueNameAtLevel(
+  opts: {
+    workspaceId: string;
+    parentFolderId: string | null;
+    name: string;
+    excludeDocumentId?: string;
+    excludeFolderId?: string;
+  },
+  db: DbClient = prisma,
+) {
   const name = opts.name.trim();
   if (!name) {
     throw new HttpError(400, "Name is required");
@@ -25,7 +30,7 @@ export async function assertUniqueNameAtLevel(opts: {
   const parentId = opts.parentFolderId;
 
   const [siblingFolders, siblingDocs] = await Promise.all([
-    prisma.folder.findMany({
+    db.folder.findMany({
       where: {
         workspaceId: opts.workspaceId,
         parentId,
@@ -34,7 +39,7 @@ export async function assertUniqueNameAtLevel(opts: {
       },
       select: { name: true },
     }),
-    prisma.document.findMany({
+    db.document.findMany({
       where: {
         workspaceId: opts.workspaceId,
         folderId: parentId,

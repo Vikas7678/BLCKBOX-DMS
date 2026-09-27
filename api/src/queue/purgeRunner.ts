@@ -5,29 +5,8 @@ import {
   resolveDocumentPathFromIds,
   resolveFolderPathFromIds,
 } from "../services/auditPath";
+import { collectDescendantFolderIds } from "../services/folders";
 import type { PurgeItem } from "./purgeQueue";
-
-function collectDescendantFolderIds(
-  rootId: string,
-  folders: { id: string; parentId: string | null }[],
-): string[] {
-  const byParent = new Map<string | null, string[]>();
-  for (const f of folders) {
-    const key = f.parentId ?? null;
-    const list = byParent.get(key) ?? [];
-    list.push(f.id);
-    byParent.set(key, list);
-  }
-  const result: string[] = [];
-  const stack = [rootId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    result.push(id);
-    const children = byParent.get(id) ?? [];
-    for (const c of children) stack.push(c);
-  }
-  return result;
-}
 
 export async function purgeDocumentById(
   documentId: string,
@@ -138,6 +117,51 @@ export async function purgeFolderById(
   }
 }
 
+/** Hard-delete a soft-deleted workspace (cascades DB rows; cleans storage keys). */
+export async function purgeWorkspaceById(
+  workspaceId: string,
+  actor?: { userId: string; name: string },
+): Promise<void> {
+  const workspace = await prisma.workspace.findFirst({
+    where: { id: workspaceId, deletedAt: { not: null } },
+  });
+  if (!workspace) {
+    return;
+  }
+
+  const snap = { id: workspace.id, name: workspace.name };
+  const documents = await prisma.document.findMany({
+    where: { workspaceId },
+    select: { id: true, storageKey: true },
+  });
+  const docIds = documents.map((d) => d.id);
+
+  if (docIds.length) {
+    await prisma.shareLink.deleteMany({ where: { documentId: { in: docIds } } });
+    await prisma.documentShare.deleteMany({ where: { documentId: { in: docIds } } });
+  }
+
+  await prisma.workspace.delete({ where: { id: workspace.id } });
+
+  for (const doc of documents) {
+    await (await getStorage()).delete(doc.storageKey).catch(() => undefined);
+  }
+
+  if (actor) {
+    recordAudit({
+      actorUserId: actor.userId,
+      actorName: actor.name,
+      action: "workspace.deleted",
+      entityType: "workspace",
+      entityId: snap.id,
+      entityName: snap.name,
+      workspaceId: snap.id,
+      label: `Workspace permanently deleted: ${snap.name}`,
+      metadata: { purgedDocuments: docIds.length },
+    });
+  }
+}
+
 export async function runPurgeItems(
   items: PurgeItem[],
   requestedByUserId?: string,
@@ -158,8 +182,10 @@ export async function runPurgeItems(
     try {
       if (item.kind === "document") {
         await purgeDocumentById(item.documentId, actor);
-      } else {
+      } else if (item.kind === "folder") {
         await purgeFolderById(item.workspaceId, item.folderId, actor);
+      } else {
+        await purgeWorkspaceById(item.workspaceId, actor);
       }
       purged += 1;
     } catch (err) {

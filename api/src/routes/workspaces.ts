@@ -4,8 +4,12 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
-import { requireMembership, canManageDocument, canDeleteDocument } from "../services/access";
+import { requireMembership, canManageWorkspaceAsAdmin } from "../services/access";
+import { mapDocumentListItems } from "../services/documentList";
 import { assertUniqueNameAtLevel } from "../services/names";
+import { collectDescendantFolderIds } from "../services/folders";
+import { searchActiveUsers } from "../services/userSearch";
+import { resolveAccessibleWorkspaceIds } from "../services/trash";
 import { inviteExpiryDate, randomToken } from "../lib/tokens";
 import { sendMail } from "../services/mailer";
 import { config } from "../config";
@@ -15,7 +19,7 @@ import {
   getPlatformRole,
 } from "../services/platform";
 import { enqueuePurgeJob } from "../queue/purgeQueue";
-import { parsePagination, paginationMeta } from "../lib/pagination";
+import { parsePagination, paginationMeta, slicePage } from "../lib/pagination";
 import { recordAudit } from "../services/audit";
 
 const createWorkspaceSchema = z.object({
@@ -52,28 +56,6 @@ const addMembersSchema = z.object({
     )
     .min(1),
 });
-
-function collectDescendantFolderIds(
-  rootId: string,
-  folders: { id: string; parentId: string | null }[],
-): string[] {
-  const byParent = new Map<string | null, string[]>();
-  for (const f of folders) {
-    const key = f.parentId ?? null;
-    const list = byParent.get(key) ?? [];
-    list.push(f.id);
-    byParent.set(key, list);
-  }
-  const ids: string[] = [];
-  const stack = [rootId];
-  while (stack.length) {
-    const current = stack.pop()!;
-    ids.push(current);
-    const children = byParent.get(current) ?? [];
-    for (const childId of children) stack.push(childId);
-  }
-  return ids;
-}
 
 function mapFolder(f: {
   id: string;
@@ -131,21 +113,26 @@ workspacesRouter.get("/", async (req, res, next) => {
         createdAt: w.createdAt,
       }));
     } else if (platformRole === "owner") {
-      const workspaces = await prisma.workspace.findMany({
-        where: { deletedAt: null, createdById: userId },
-        include: {
-          members: {
-            where: { userId },
-            select: { role: true },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      // Memberships ∪ created workspaces. Membership role "owner" ≠ creator (createdById).
+      const workspaceIds = await resolveAccessibleWorkspaceIds(userId, platformRole);
+      const workspaces = workspaceIds.length
+        ? await prisma.workspace.findMany({
+            where: { deletedAt: null, id: { in: workspaceIds } },
+            include: {
+              members: {
+                where: { userId },
+                select: { role: true },
+                take: 1,
+              },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
       rows = workspaces.map((w) => ({
         id: w.id,
         name: w.name,
         description: w.description,
+        // Prefer membership role; creator without a row still shows as owner in the UI.
         role: w.members[0]?.role ?? "owner",
         createdAt: w.createdAt,
       }));
@@ -168,10 +155,7 @@ workspacesRouter.get("/", async (req, res, next) => {
       rows = rows.filter((w) => w.name.toLowerCase().includes(q));
     }
 
-    const total = rows.length;
-    const meta = paginationMeta(total, page, limit);
-    const start = (meta.page - 1) * limit;
-    const workspaces = rows.slice(start, start + limit);
+    const { items: workspaces, meta } = slicePage(rows, page, limit);
 
     res.json({ workspaces, ...meta });
   } catch (err) {
@@ -282,6 +266,10 @@ workspacesRouter.patch("/:id", async (req, res, next) => {
 
 workspacesRouter.delete("/:id", async (req, res, next) => {
   try {
+    const platformRole = await getPlatformRole(req.user!.id);
+    if (!canDeleteContent(platformRole)) {
+      throw new HttpError(403, "Members cannot delete workspaces");
+    }
     await requireMembership(req.params.id, req.user!.id, ["owner"]);
     const workspace = await prisma.workspace.findFirst({
       where: { id: req.params.id, deletedAt: null },
@@ -289,11 +277,116 @@ workspacesRouter.delete("/:id", async (req, res, next) => {
     if (!workspace) {
       throw new HttpError(404, "Workspace not found");
     }
-    await prisma.workspace.update({
-      where: { id: workspace.id },
-      data: { deletedAt: new Date() },
+
+    const deletedAt = new Date();
+    await prisma.$transaction([
+      prisma.workspace.update({
+        where: { id: workspace.id },
+        data: { deletedAt },
+      }),
+      prisma.folder.updateMany({
+        where: { workspaceId: workspace.id, deletedAt: null },
+        data: { deletedAt },
+      }),
+      prisma.document.updateMany({
+        where: { workspaceId: workspace.id, deletedAt: null },
+        data: { deletedAt },
+      }),
+    ]);
+
+    recordAudit({
+      actorUserId: req.user!.id,
+      action: "workspace.trashed",
+      entityType: "workspace",
+      entityId: workspace.id,
+      entityName: workspace.name,
+      workspaceId: workspace.id,
+      label: `Workspace moved to trashcan: ${workspace.name}`,
     });
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+workspacesRouter.post("/:id/restore", async (req, res, next) => {
+  try {
+    const platformRole = await getPlatformRole(req.user!.id);
+    if (!canDeleteContent(platformRole)) {
+      throw new HttpError(403, "Members cannot restore workspaces");
+    }
+    if (!(await canManageWorkspaceAsAdmin(req.params.id, req.user!.id))) {
+      throw new HttpError(403, "You cannot restore this workspace");
+    }
+    const workspace = await prisma.workspace.findFirst({
+      where: { id: req.params.id, deletedAt: { not: null } },
+    });
+    if (!workspace) {
+      throw new HttpError(404, "Trashed workspace not found");
+    }
+
+    await prisma.$transaction([
+      prisma.workspace.update({
+        where: { id: workspace.id },
+        data: { deletedAt: null },
+      }),
+      prisma.folder.updateMany({
+        where: { workspaceId: workspace.id, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      }),
+      prisma.document.updateMany({
+        where: { workspaceId: workspace.id, deletedAt: { not: null } },
+        data: { deletedAt: null },
+      }),
+    ]);
+
+    recordAudit({
+      actorUserId: req.user!.id,
+      action: "workspace.restored",
+      entityType: "workspace",
+      entityId: workspace.id,
+      entityName: workspace.name,
+      workspaceId: workspace.id,
+      label: `Workspace restored from trashcan: ${workspace.name}`,
+    });
+    res.json({
+      workspace: {
+        id: workspace.id,
+        name: workspace.name,
+        description: workspace.description,
+        createdAt: workspace.createdAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+workspacesRouter.delete("/:id/permanent", async (req, res, next) => {
+  try {
+    const platformRole = await getPlatformRole(req.user!.id);
+    if (!canDeleteContent(platformRole)) {
+      throw new HttpError(403, "Members cannot permanently delete workspaces");
+    }
+    if (!(await canManageWorkspaceAsAdmin(req.params.id, req.user!.id))) {
+      throw new HttpError(403, "You cannot permanently delete this workspace");
+    }
+    const workspace = await prisma.workspace.findFirst({
+      where: { id: req.params.id, deletedAt: { not: null } },
+    });
+    if (!workspace) {
+      throw new HttpError(404, "Trashed workspace not found");
+    }
+
+    const { jobId } = await enqueuePurgeJob({
+      requestedByUserId: req.user!.id,
+      items: [{ kind: "workspace", workspaceId: workspace.id }],
+    });
+    res.status(202).json({
+      queued: true,
+      jobId,
+      message: "Your delete request has been queued",
+    });
   } catch (err) {
     next(err);
   }
@@ -374,21 +467,7 @@ workspacesRouter.get("/:id/contents", async (req, res, next) => {
           skip: 0,
           take: remaining,
         });
-        documents = await Promise.all(
-          docs.map(async (doc) => ({
-            id: doc.id,
-            title: doc.title,
-            filename: doc.filename,
-            mimeType: doc.mimeType,
-            sizeBytes: doc.sizeBytes,
-            ownerId: doc.ownerId,
-            workspaceId: doc.workspaceId,
-            folderId: doc.folderId,
-            createdAt: doc.createdAt,
-            canManage: await canManageDocument(doc, userId),
-            canDelete: await canDeleteDocument(doc, userId),
-          })),
-        );
+        documents = await mapDocumentListItems(docs, userId);
       }
     } else {
       const docs = await prisma.document.findMany({
@@ -397,21 +476,7 @@ workspacesRouter.get("/:id/contents", async (req, res, next) => {
         skip: skip - folderTotal,
         take: limit,
       });
-      documents = await Promise.all(
-        docs.map(async (doc) => ({
-          id: doc.id,
-          title: doc.title,
-          filename: doc.filename,
-          mimeType: doc.mimeType,
-          sizeBytes: doc.sizeBytes,
-          ownerId: doc.ownerId,
-          workspaceId: doc.workspaceId,
-          folderId: doc.folderId,
-          createdAt: doc.createdAt,
-          canManage: await canManageDocument(doc, userId),
-          canDelete: await canDeleteDocument(doc, userId),
-        })),
-      );
+      documents = await mapDocumentListItems(docs, userId);
     }
 
     res.json({ folders, documents, ...meta });
@@ -459,22 +524,14 @@ workspacesRouter.post("/:id/folders", async (req, res, next) => {
           return { folder: existing, created: false };
         }
 
-        const siblingDocs = await tx.document.findMany({
-          where: {
+        await assertUniqueNameAtLevel(
+          {
             workspaceId: req.params.id,
-            folderId: parentId,
-            deletedAt: null,
+            parentFolderId: parentId,
+            name,
           },
-          select: { filename: true, title: true },
-        });
-        const fileClash = siblingDocs.some(
-          (d) =>
-            d.filename.trim().toLowerCase() === nameKey ||
-            d.title.trim().toLowerCase() === nameKey,
+          tx,
         );
-        if (fileClash) {
-          throw new HttpError(409, `A file named "${name}" already exists here`);
-        }
 
         const createdFolder = await tx.folder.create({
           data: {
@@ -689,28 +746,14 @@ workspacesRouter.get("/:id/members", async (req, res, next) => {
 workspacesRouter.get("/:id/addable-users", async (req, res, next) => {
   try {
     await requireMembership(req.params.id, req.user!.id, ["owner", "admin"]);
-    const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const existing = await prisma.workspaceMember.findMany({
       where: { workspaceId: req.params.id },
       select: { userId: true },
     });
-    const excludeIds = existing.map((m) => m.userId);
-    const users = await prisma.user.findMany({
-      where: {
-        deletedAt: null,
-        disabledAt: null,
-        ...(excludeIds.length ? { id: { notIn: excludeIds } } : {}),
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" } },
-                { email: { contains: q, mode: "insensitive" } },
-              ],
-            }
-          : {}),
-      },
-      select: { id: true, email: true, name: true },
-      orderBy: { name: "asc" },
+    const users = await searchActiveUsers({
+      q,
+      excludeIds: existing.map((m) => m.userId),
       take: 50,
     });
     res.json({ users });

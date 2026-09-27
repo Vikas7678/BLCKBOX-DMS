@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { ToastContainer } from "react-toastify";
 import { AuthProvider, useAuth } from "./AuthContext";
@@ -15,13 +15,22 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { MySharesPage } from "./pages/MySharesPage";
 import { SharedWithMePage } from "./pages/SharedWithMePage";
 import { AppShell } from "./components/AppShell";
+import { loginWithNext } from "./helpers/authRedirect";
 import "./toast";
 import "./alertify";
 
 function Protected({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <p className="layout">Loading…</p>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    return (
+      <Navigate
+        to={loginWithNext(`${location.pathname}${location.search}`)}
+        replace
+      />
+    );
+  }
   return children;
 }
 

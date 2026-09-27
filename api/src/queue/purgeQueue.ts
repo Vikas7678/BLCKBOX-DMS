@@ -5,7 +5,8 @@ export const PURGE_QUEUE_NAME = "trash-purge";
 
 export type PurgeItem =
   | { kind: "document"; documentId: string }
-  | { kind: "folder"; workspaceId: string; folderId: string };
+  | { kind: "folder"; workspaceId: string; folderId: string }
+  | { kind: "workspace"; workspaceId: string };
 
 export type PurgeJobData = {
   requestedByUserId: string;

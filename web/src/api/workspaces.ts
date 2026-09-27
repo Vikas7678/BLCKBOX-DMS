@@ -28,6 +28,12 @@ export const workspacesApi = {
     }),
   deleteWorkspace: (id: string) =>
     request<{ ok: boolean }>(`/workspaces/${id}`, { method: "DELETE" }),
+  restoreWorkspace: (id: string) =>
+    request<{ workspace: WorkspaceItem }>(`/workspaces/${id}/restore`, { method: "POST" }),
+  purgeWorkspace: (id: string) =>
+    request<{ queued: boolean; jobId: string; message: string }>(`/workspaces/${id}/permanent`, {
+      method: "DELETE",
+    }),
   listWorkspaceContents: (
     workspaceId: string,
     folderId?: string | null,
