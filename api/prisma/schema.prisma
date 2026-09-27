@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  owner
+  admin
+  member
+}
+
+enum PlatformRole {
+  admin
+  owner
+  member
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String?
+  name           String
+  platformRole   PlatformRole @default(member)
+  disabledAt     DateTime?
+  deletedAt      DateTime?
+  /** Bumped on disable/archive so existing JWTs stop working (Angora-style force logout). */
+  sessionVersion Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  ownedWorkspaces Workspace[]         @relation("WorkspaceCreator")
+  memberships     WorkspaceMember[]
+  documents       Document[]          @relation("DocumentOwner")
+  updatedDocuments Document[]         @relation("DocumentUpdater")
+  shareLinks      ShareLink[]         @relation("ShareLinkCreator")
+  documentSharesCreated  DocumentShare[] @relation("DocumentSharesCreated")
+  documentSharesReceived DocumentShare[] @relation("DocumentSharesReceived")
+  invitations     WorkspaceInvitation[] @relation("InvitationCreator")
+  folders         Folder[]
+}
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  createdBy   User                 @relation("WorkspaceCreator", fields: [createdById], references: [id])
+  members     WorkspaceMember[]
+  invitations WorkspaceInvitation[]
+  documents   Document[]
+  folders     Folder[]
+}
+
+model Folder {
+  id          String    @id @default(cuid())
+  name        String
+  workspaceId String
+  parentId    String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id])
+  parent    Folder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]   @relation("FolderTree")
+  documents Document[]
+
+  @@index([workspaceId])
+  @@index([parentId])
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole
+  token       String        @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdById String
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("InvitationCreator", fields: [createdById], references: [id])
+
+  @@index([email])
+  @@index([workspaceId])
+}
+
+model Document {
+  id          String    @id @default(cuid())
+  title       String
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String
+  ownerId     String
+  updatedById String?
+  workspaceId String?
+  folderId    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  owner     User       @relation("DocumentOwner", fields: [ownerId], references: [id])
+  updatedBy User?      @relation("DocumentUpdater", fields: [updatedById], references: [id])
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  folder    Folder?    @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  shareLinks ShareLink[]
+  shareLinkDocuments ShareLinkDocument[]
+  documentShares DocumentShare[]
+
+  @@index([ownerId])
+  @@index([updatedById])
+  @@index([workspaceId])
+  @@index([folderId])
+}
+
+model ShareLink {
+  id             String    @id @default(cuid())
+  documentId     String
+  token          String    @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  passwordHash   String?
+  recipientEmail String    @default("")
+  message        String    @default("")
+  allowDownload  Boolean   @default(true)
+  createdById    String
+  createdAt      DateTime  @default(now())
+
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("ShareLinkCreator", fields: [createdById], references: [id])
+  documents ShareLinkDocument[]
+
+  @@index([documentId])
+  @@index([createdById])
+}
+
+/** Extra documents on a share link (multi-file external share). Primary is still ShareLink.documentId. */
+model ShareLinkDocument {
+  id          String @id @default(cuid())
+  shareLinkId String
+  documentId  String
+  sortOrder   Int    @default(0)
+
+  shareLink ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+  document  Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([shareLinkId, documentId])
+  @@index([documentId])
+}
+
+/** Internal share to an existing BLCKBOX user (view only; no delete). */
+model DocumentShare {
+  id               String    @id @default(cuid())
+  documentId       String
+  sharedWithUserId String
+  sharedById       String
+  message          String    @default("")
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sharedWith User     @relation("DocumentSharesReceived", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  sharedBy   User     @relation("DocumentSharesCreated", fields: [sharedById], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, sharedWithUserId])
+  @@index([sharedWithUserId])
+  @@index([sharedById])
+  @@index([documentId])
+}
+
+/** Singleton platform settings (email SMTP + file storage). Not per-user. */
+model PlatformSettings {
+  id                  String   @id @default(cuid())
+  // Email / SMTP
+  fromEmail           String   @default("")
+  fromName            String   @default("")
+  host                String   @default("")
+  port                Int      @default(587)
+  username            String   @default("")
+  password            String   @default("")
+  useSecureConnection Boolean  @default(false)
+  // Storage
+  provider            String   @default("local") // local | s3
+  localPath           String   @default("")
+  s3Bucket            String   @default("")
+  s3Region            String   @default("")
+  s3AccessKeyId       String   @default("")
+  s3SecretAccessKey   String   @default("")
+  s3Endpoint          String   @default("")
+  s3ForcePathStyle    Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+/** File/folder activity trail (Angora-style). Written async via Redis/BullMQ. */
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  actorName   String
+  action      String
+  entityType  String // document | folder
+  entityId    String
+  entityName  String
+  label       String
+  workspaceId String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([entityId, createdAt(sort: Desc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+}

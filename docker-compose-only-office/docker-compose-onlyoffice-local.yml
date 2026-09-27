@@ -1,0 +1,24 @@
+version: "3.8"
+
+# Local OnlyOffice Document Server for BLCKBOX previews.
+# From this folder: docker compose -f docker-compose-onlyoffice-local.yml up -d
+#
+# Document Server is at http://localhost:8080
+# It fetches files via PUBLIC_API_URL (host.docker.internal:4000).
+
+services:
+  onlyoffice-documentserver:
+    container_name: blckbox-onlyoffice
+    image: onlyoffice/documentserver:9.3.1
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - JWT_SECRET=blckbox-onlyoffice-jwt-secret-change-me
+      - JWT_HEADER=AuthorizationJwt
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+      - ALLOW_META_IP_ADDRESS=true
+    volumes:
+      - ./default.json:/etc/onlyoffice/documentserver/default.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

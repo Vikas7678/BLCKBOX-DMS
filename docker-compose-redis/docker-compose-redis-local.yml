@@ -1,0 +1,20 @@
+version: "3.8"
+
+# Local Redis for BLCKBOX (BullMQ trash-purge queue).
+# From this folder: docker compose -f docker-compose-redis-local.yml up -d
+#
+# Redis is at redis://127.0.0.1:6379 (matches REDIS_URL in api/.env).
+
+services:
+  redis:
+    container_name: blckbox-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - blckbox-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  blckbox-redis-data:
