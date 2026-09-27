@@ -1,3 +1,7 @@
+/**
+ * Authenticated sharing APIs (`/api/shares/...`): internal user shares, external links, mine / with-me.
+ * Public token unlock/download is in `share.ts` (sharePublicRouter).
+ */
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";

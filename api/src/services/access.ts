@@ -1,3 +1,7 @@
+/**
+ * Workspace/document authorization helpers.
+ * Platform `admin` is treated as workspace `owner` for membership checks (see requireMembership).
+ */
 import { Document, WorkspaceMember, WorkspaceRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/error";

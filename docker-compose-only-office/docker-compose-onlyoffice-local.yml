@@ -1,6 +1,7 @@
 version: "3.8"
 
-# Local OnlyOffice Document Server for BLCKBOX previews.
+# Optional host-dev OnlyOffice (when not using the full-stack compose).
+# Full stack already includes OnlyOffice — prefer docker-compose.local.yml from repo root.
 # From this folder: docker compose -f docker-compose-onlyoffice-local.yml up -d
 #
 # Document Server is at http://localhost:8080

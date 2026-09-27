@@ -9,16 +9,11 @@ import { confirmDanger } from "../alertify";
 import { PasswordInput } from "../components/PasswordInput";
 import { PaginationBar } from "../components/PaginationBar";
 import { SearchableDropdown } from "../components/SearchableDropdown";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
+import { formatDate } from "../helpers/date";
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
 
 function roleLabel(role: ColleagueUser["platformRole"]) {
   if (role === "admin") return "Admin";
@@ -64,19 +59,14 @@ export function UsersPage() {
     const q = opts?.q ?? appliedQ;
     const r = await api.listUsers({ page: p, q });
     setUsers(r.users);
-    setMeta({
-      page: r.page,
-      limit: r.limit,
-      total: r.total,
-      totalPages: r.totalPages,
-    });
+    setMeta(toPaginationMeta(r));
     setCanManage(r.canManage ?? canManageUsers(me?.platformRole));
   }
 
   useEffect(() => {
     if (!allowed) return;
     void load().catch((err) =>
-      setError(err instanceof Error ? err.message : "Failed to load users"),
+      setError(errMessage(err, "Failed to load users")),
     );
   }, [allowed, page, appliedQ]);
 
@@ -90,7 +80,7 @@ export function UsersPage() {
     try {
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(errMessage(err, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
@@ -130,7 +120,7 @@ export function UsersPage() {
         );
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create user");
+      toast.error(errMessage(err, "Could not create user"));
     } finally {
       setSaving(false);
     }
@@ -146,7 +136,7 @@ export function UsersPage() {
       );
       toast.success("Role updated");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed");
+      toast.error(errMessage(err, "Update failed"));
     } finally {
       setBusyId(null);
     }
@@ -173,7 +163,7 @@ export function UsersPage() {
         toast.success("User disabled");
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed");
+      toast.error(errMessage(err, "Update failed"));
     } finally {
       setBusyId(null);
     }
@@ -190,7 +180,7 @@ export function UsersPage() {
             toast.success("User archived");
             await load();
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Archive failed");
+            toast.error(errMessage(err, "Archive failed"));
           } finally {
             setBusyId(null);
           }

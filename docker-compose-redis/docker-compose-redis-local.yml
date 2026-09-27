@@ -1,6 +1,7 @@
 version: "3.8"
 
-# Local Redis for BLCKBOX (BullMQ trash-purge queue).
+# Optional host-dev Redis (when not using the full-stack compose).
+# Full stack already includes Redis — prefer docker-compose.local.yml from repo root.
 # From this folder: docker compose -f docker-compose-redis-local.yml up -d
 #
 # Redis is at redis://127.0.0.1:6379 (matches REDIS_URL in api/.env).

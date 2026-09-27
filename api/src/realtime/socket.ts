@@ -80,7 +80,7 @@ export function emitToUser(
   getIo()?.to(`user:${userId}`).emit(event, payload);
 }
 
-/** Force-disconnect all Socket.IO connections for a user (Angora session end). */
+/** Force-disconnect all Socket.IO connections for a user (session end). */
 export function disconnectUserSockets(userId: string): void {
   getIo()?.in(`user:${userId}`).disconnectSockets(true);
 }

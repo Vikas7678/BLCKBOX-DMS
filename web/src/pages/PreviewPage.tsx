@@ -1,4 +1,3 @@
-import { getIcon } from "material-file-icons";
 import {
   ChevronDown,
   Download,
@@ -15,11 +14,14 @@ import { api } from "../api";
 import type { DocumentItem, FolderItem, OnlyOfficePreviewPayload } from "../api";
 import { useAuth } from "../AuthContext";
 import { AuditTrailModal } from "../components/AuditTrailModal";
+import { FileTypeIcon } from "../components/FileTypeIcon";
 import { OnlyOfficePreviewer } from "../components/OnlyOfficePreviewer";
 import { PreviewErrorBoundary } from "../components/PreviewErrorBoundary";
 import { ShareModal } from "../components/ShareModal";
 import { confirmDanger } from "../alertify";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
+import { formatDate } from "../helpers/date";
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -27,13 +29,6 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
 
 function getPathExtname(filename: string) {
   const base = filename.includes("/")
@@ -61,17 +56,6 @@ function folderAncestors(folderId: string, folders: FolderItem[]): FolderItem[] 
     cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
   }
   return chain;
-}
-
-function FileTypeIcon({ filename }: { filename: string }) {
-  const icon = getIcon(filename);
-  return (
-    <span
-      className="file-type-icon preview-file-icon"
-      aria-hidden
-      dangerouslySetInnerHTML={{ __html: icon.svg }}
-    />
-  );
 }
 
 export function PreviewPage() {
@@ -108,7 +92,11 @@ export function PreviewPage() {
       setDoc(document);
       setPayload(preview);
 
-      if (document.workspaceId) {
+      // Share-only recipients must not see workspace/folder navigation.
+      if (document.accessViaInternalShare || !document.workspaceId) {
+        setWorkspaceName(null);
+        setFolderChain([]);
+      } else {
         try {
           const [{ workspace }, { folders }] = await Promise.all([
             api.getWorkspace(document.workspaceId),
@@ -122,12 +110,9 @@ export function PreviewPage() {
           setWorkspaceName(null);
           setFolderChain([]);
         }
-      } else {
-        setWorkspaceName(null);
-        setFolderChain([]);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Preview failed");
+      toast.error(errMessage(err, "Preview failed"));
       navigate(-1);
     } finally {
       setLoading(false);
@@ -203,7 +188,7 @@ export function PreviewPage() {
         });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Rename failed");
+      toast.error(errMessage(err, "Rename failed"));
     } finally {
       setRenaming(false);
     }
@@ -220,7 +205,7 @@ export function PreviewPage() {
           if (doc.workspaceId) navigate(`/workspaces/${doc.workspaceId}`);
           else navigate("/");
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusy(false);
         }
@@ -240,56 +225,63 @@ export function PreviewPage() {
 
   return (
     <div className="preview-page">
-      <div className="preview-crumb-row">
-        <nav className="file-breadcrumb" aria-label="Breadcrumb">
-          {doc?.workspaceId && workspaceName ? (
-            <>
-              <button type="button" className="crumb" onClick={() => openFolder(null)}>
-                {workspaceName}
-              </button>
-              {folderChain.map((folder) => (
-                <span key={folder.id} className="crumb-segment">
+      {!doc?.accessViaInternalShare && (
+        <div className="preview-crumb-row">
+          <nav className="file-breadcrumb" aria-label="Breadcrumb">
+            {doc?.workspaceId && workspaceName ? (
+              <>
+                <button type="button" className="crumb" onClick={() => openFolder(null)}>
+                  {workspaceName}
+                </button>
+                {folderChain.map((folder) => (
+                  <span key={folder.id} className="crumb-segment">
+                    <span className="crumb-sep" aria-hidden>
+                      &gt;
+                    </span>
+                    <button
+                      type="button"
+                      className="crumb"
+                      onClick={() => openFolder(folder.id)}
+                    >
+                      {folder.name}
+                    </button>
+                  </span>
+                ))}
+                <span className="crumb-segment">
                   <span className="crumb-sep" aria-hidden>
                     &gt;
                   </span>
-                  <button
-                    type="button"
-                    className="crumb"
-                    onClick={() => openFolder(folder.id)}
-                  >
-                    {folder.name}
-                  </button>
+                  <span className="crumb current">{displayName}</span>
                 </span>
-              ))}
-              <span className="crumb-segment">
-                <span className="crumb-sep" aria-hidden>
-                  &gt;
-                </span>
-                <span className="crumb current">{displayName}</span>
-              </span>
-            </>
-          ) : (
-            <span className="crumb current">{displayName}</span>
-          )}
-        </nav>
-        <button
-          type="button"
-          className="trash-refresh"
-          aria-label="Refresh"
-          title="Refresh"
-          disabled={loading}
-          onClick={() => void loadPreview()}
-        >
-          <RefreshCw size={20} strokeWidth={2.75} className={loading ? "spin" : undefined} />
-        </button>
-      </div>
+              </>
+            ) : (
+              <span className="crumb current">{displayName}</span>
+            )}
+          </nav>
+          <button
+            type="button"
+            className="trash-refresh"
+            aria-label="Refresh"
+            title="Refresh"
+            disabled={loading}
+            onClick={() => void loadPreview()}
+          >
+            <RefreshCw size={20} strokeWidth={2.75} className={loading ? "spin" : undefined} />
+          </button>
+        </div>
+      )}
 
       <div className="preview-layout">
         <div className="preview-main">
           <div className="preview-card">
             <header className="preview-file-header">
               <div className="preview-file-card-left">
-                {doc && <FileTypeIcon filename={doc.filename} />}
+                {doc && (
+                  <FileTypeIcon
+                    filename={doc.filename}
+                    className="file-type-icon preview-file-icon"
+                  />
+                )}
                 <div>
                   <h1 className="preview-file-name">{displayName}</h1>
                   {doc && (

@@ -3,8 +3,6 @@
 #   1. Add to /etc/hosts:  127.0.0.1  app.blckbox.localapp
 #   2. docker compose -f docker-compose.local.yml up -d --build
 #   3. Open http://app.blckbox.localapp
-#
-# Stop the old host-only nginx (blckbox-nginx-local) first if port 80 is taken.
 
 services:
   postgres:
@@ -45,7 +43,7 @@ services:
       DATABASE_URL: postgresql://blckbox:blckbox@postgres:5432/blckbox
       REDIS_URL: redis://redis:6379
       API_PORT: "4000"
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_COOKIE_NAME: blckbox_token
       JWT_EXPIRES_DAYS: "7"
       CORS_ORIGIN: http://app.blckbox.localapp

@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { getIcon } from "material-file-icons";
 import { api } from "../api";
 import { PasswordInput } from "./PasswordInput";
 import { SearchableDropdown, type SearchableOption } from "./SearchableDropdown";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
+import { FileTypeIcon } from "./FileTypeIcon";
 
 function defaultExpiryLocal(): string {
   const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -20,16 +21,6 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function FileTypeIcon({ filename }: { filename: string }) {
-  const icon = getIcon(filename);
-  return (
-    <span
-      className="file-type-icon"
-      aria-hidden
-      dangerouslySetInnerHTML={{ __html: icon.svg }}
-    />
-  );
-}
 
 export function ShareModal({
   documents: documentsProp,
@@ -171,7 +162,7 @@ export function ShareModal({
         toast.success("Share link generated");
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Share failed");
+      toast.error(errMessage(err, "Share failed"));
     } finally {
       setBusy(false);
     }

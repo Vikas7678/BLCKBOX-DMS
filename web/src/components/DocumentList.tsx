@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { getIcon } from "material-file-icons";
 import { ChevronDown, Download, Folder, History, MoreVertical, Share2, Trash2 } from "lucide-react";
 import { api } from "../api";
 import type { DocumentItem, FolderItem } from "../api";
@@ -11,6 +10,9 @@ import { AuditTrailModal } from "./AuditTrailModal";
 import { PaginationBar } from "./PaginationBar";
 import type { PaginationMeta } from "../pagination";
 import emptyFolderImg from "../assets/empty-folder.svg";
+import { errMessage } from "../helpers/errors";
+import { formatDate } from "../helpers/date";
+import { FileTypeIcon } from "./FileTypeIcon";
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -18,24 +20,7 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
 
-function FileTypeIcon({ filename }: { filename: string }) {
-  const icon = getIcon(filename);
-  return (
-    <span
-      className="file-type-icon"
-      aria-hidden
-      dangerouslySetInnerHTML={{ __html: icon.svg }}
-    />
-  );
-}
 
 type MenuTarget =
   | { kind: "doc"; id: string }
@@ -147,7 +132,7 @@ export function DocumentList({
           toast.success("Document moved to trash");
           onChanged();
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusyId(null);
         }
@@ -165,7 +150,7 @@ export function DocumentList({
           await onDeleteFolder(id);
           toast.success("Folder moved to trash");
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusyId(null);
         }
@@ -217,7 +202,7 @@ export function DocumentList({
           setSelected(new Set());
           onChanged();
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusyId(null);
         }

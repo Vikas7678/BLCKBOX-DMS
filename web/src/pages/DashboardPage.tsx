@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import type { DashboardData } from "../api";
+import { errMessage } from "../helpers/errors";
 
 function formatWhen(iso: string) {
   const d = new Date(iso);
@@ -57,7 +58,7 @@ export function DashboardPage() {
     void api
       .getDashboard()
       .then(setData)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load dashboard"));
+      .catch((err) => setError(errMessage(err, "Failed to load dashboard")));
   }, []);
 
   if (error) return <p className="error">{error}</p>;

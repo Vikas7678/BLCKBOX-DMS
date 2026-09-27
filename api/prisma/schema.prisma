@@ -27,7 +27,7 @@ model User {
   platformRole   PlatformRole @default(member)
   disabledAt     DateTime?
   deletedAt      DateTime?
-  /** Bumped on disable/archive so existing JWTs stop working (Angora-style force logout). */
+  /** Bumped on disable/archive so existing JWTs stop working (force logout). */
   sessionVersion Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -221,7 +221,7 @@ model PlatformSettings {
   updatedAt           DateTime @updatedAt
 }
 
-/** File/folder activity trail (Angora-style). Written async via Redis/BullMQ. */
+/** File/folder activity trail. Written async via Redis/BullMQ. */
 model AuditLog {
   id          String   @id @default(cuid())
   actorUserId String

@@ -1,3 +1,8 @@
+/**
+ * Public invite + share-token routers.
+ * Mounted as `/api/invites` (invitesRouter) and `/api/s` (sharePublicRouter).
+ * Authenticated sharing (create/list/revoke) lives in `shares.ts`.
+ */
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";

@@ -7,7 +7,8 @@ import type { WorkspaceItem } from "../api";
 import { useAuth } from "../AuthContext";
 import { canCreateWorkspace } from "../permissions";
 import { toast } from "../toast";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
+import { errMessage } from "../helpers/errors";
 
 type Props = {
   onClose: () => void;
@@ -36,12 +37,7 @@ export function WorkspacePanel({ onClose }: Props) {
 
   const fetchPage = useCallback(async (pageNum: number, q: string, mode: "replace" | "append") => {
     const res = await api.listWorkspaces({ page: pageNum, q });
-    setMeta({
-      page: res.page,
-      limit: res.limit,
-      total: res.total,
-      totalPages: res.totalPages,
-    });
+    setMeta(toPaginationMeta(res));
     setPage(res.page);
     if (mode === "append") {
       setWorkspaces((prev) => {
@@ -57,7 +53,7 @@ export function WorkspacePanel({ onClose }: Props) {
   useEffect(() => {
     setLoading(true);
     void fetchPage(1, appliedQ, "replace")
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load"))
+      .catch((err) => toast.error(errMessage(err, "Failed to load")))
       .finally(() => setLoading(false));
   }, [appliedQ, fetchPage]);
 
@@ -67,7 +63,7 @@ export function WorkspacePanel({ onClose }: Props) {
       await fetchPage(1, appliedQ, "replace");
       toast.success("Workspaces refreshed");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(errMessage(err, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
@@ -79,7 +75,7 @@ export function WorkspacePanel({ onClose }: Props) {
     try {
       await fetchPage(page + 1, appliedQ, "append");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load more");
+      toast.error(errMessage(err, "Failed to load more"));
     } finally {
       setLoadingMore(false);
     }
@@ -114,7 +110,7 @@ export function WorkspacePanel({ onClose }: Props) {
       setView("success");
       toast.success("Workspace created");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create workspace");
+      toast.error(errMessage(err, "Could not create workspace"));
     } finally {
       setSaving(false);
     }

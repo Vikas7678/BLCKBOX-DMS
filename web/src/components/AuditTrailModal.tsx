@@ -3,8 +3,10 @@ import { Clock, History, User, X } from "lucide-react";
 import { api } from "../api";
 import type { AuditTrailItem } from "../api";
 import { PaginationBar } from "./PaginationBar";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
+import { formatDate } from "../helpers/date";
 
 type Props = {
   entityType: "document" | "folder";
@@ -13,13 +15,6 @@ type Props = {
   onClose: () => void;
 };
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
 
 export function AuditTrailModal({ entityType, entityId, entityName, onClose }: Props) {
   const [items, setItems] = useState<AuditTrailItem[]>([]);
@@ -36,14 +31,9 @@ export function AuditTrailModal({ entityType, entityId, entityName, onClose }: P
     void load
       .then((res) => {
         setItems(res.items);
-        setMeta({
-          page: res.page,
-          limit: res.limit,
-          total: res.total,
-          totalPages: res.totalPages,
-        });
+        setMeta(toPaginationMeta(res));
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load audit trail"))
+      .catch((err) => toast.error(errMessage(err, "Failed to load audit trail")))
       .finally(() => setLoading(false));
   }, [entityType, entityId, page]);
 

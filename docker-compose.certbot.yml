@@ -1,5 +1,5 @@
 # Full stack — HTTPS via Let’s Encrypt (blckbox.dms.com)
-# Requires on host (DigitalOcean DNS plugin, Angora-style):
+# Requires on host (DigitalOcean DNS plugin):
 #   /etc/nginx/digitalocean/credentials.ini
 #
 # First-time cert (optional one-shot):

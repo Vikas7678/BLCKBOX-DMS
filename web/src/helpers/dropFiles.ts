@@ -1,4 +1,4 @@
-/** File + relative folder path helpers for drag-and-drop uploads (Angora-style). */
+/** File + relative folder path helpers for drag-and-drop uploads. */
 
 export type QueuedDropFile = {
   file: File;

@@ -5,6 +5,7 @@ import { useAuth } from "../AuthContext";
 import { canAccessSettings } from "../permissions";
 import { PasswordInput } from "../components/PasswordInput";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
 
 function EmailSettings() {
   const [form, setForm] = useState({
@@ -36,7 +37,7 @@ function EmailSettings() {
         });
         setPasswordSet(smtp.passwordSet);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load SMTP"))
+      .catch((err) => toast.error(errMessage(err, "Failed to load SMTP")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -57,7 +58,7 @@ function EmailSettings() {
       setForm((f) => ({ ...f, password: "" }));
       toast.success("SMTP settings saved");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
+      toast.error(errMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -69,7 +70,7 @@ function EmailSettings() {
       await api.testSmtpSettings();
       toast.success("Test email sent");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Test failed");
+      toast.error(errMessage(err, "Test failed"));
     } finally {
       setTesting(false);
     }
@@ -197,7 +198,7 @@ function StorageSettings() {
         });
         setSecretSet(storage.s3SecretSet);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load storage"))
+      .catch((err) => toast.error(errMessage(err, "Failed to load storage")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -219,7 +220,7 @@ function StorageSettings() {
       setForm((f) => ({ ...f, s3SecretAccessKey: "" }));
       toast.success("Storage settings saved");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
+      toast.error(errMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -231,7 +232,7 @@ function StorageSettings() {
       await api.testStorageSettings();
       toast.success("Storage connection OK");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Test failed");
+      toast.error(errMessage(err, "Test failed"));
     } finally {
       setTesting(false);
     }

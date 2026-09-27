@@ -1,3 +1,7 @@
+/**
+ * Auth session for the SPA.
+ * Loads the current user via cookie JWT (`api.me`), exposes refresh/setUser for login/logout flows.
+ */
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "./api";

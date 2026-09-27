@@ -9,7 +9,8 @@ import { toast } from "../toast";
 import { DocumentList } from "../components/DocumentList";
 import { UploadModal } from "../components/UploadModal";
 import { collectFromDataTransfer, type QueuedDropFile } from "../helpers/dropFiles";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import { emptyMeta, toPaginationMeta, type PaginationMeta } from "../pagination";
+import { errMessage } from "../helpers/errors";
 
 function folderAncestors(folderId: string, folders: FolderItem[]): FolderItem[] {
   const byId = new Map(folders.map((f) => [f.id, f]));
@@ -68,19 +69,14 @@ export function WorkspacePage() {
     setWorkspace(w.workspace);
     setDocs(contents.documents);
     setTableFolders(contents.folders);
-    setContentsMeta({
-      page: contents.page,
-      limit: contents.limit,
-      total: contents.total,
-      totalPages: contents.totalPages,
-    });
+    setContentsMeta(toPaginationMeta(contents));
     setMemberCount(m.members.length);
     setFolders(f.folders);
   }
 
   useEffect(() => {
     void load().catch((err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to load"),
+      toast.error(errMessage(err, "Failed to load")),
     );
   }, [id, activeFolderId, page]);
 
@@ -116,7 +112,7 @@ export function WorkspacePage() {
       await load();
       openFolder(folder.id);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create folder");
+      toast.error(errMessage(err, "Could not create folder"));
     } finally {
       setSavingFolder(false);
     }

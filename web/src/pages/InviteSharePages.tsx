@@ -7,6 +7,7 @@ import { useAuth } from "../AuthContext";
 import { OnlyOfficePreviewer } from "../components/OnlyOfficePreviewer";
 import { PreviewErrorBoundary } from "../components/PreviewErrorBoundary";
 import { PasswordInput } from "../components/PasswordInput";
+import { errMessage } from "../helpers/errors";
 
 function formatShareExpiry(expiresAt: string | undefined | null): string {
   if (!expiresAt) return "";
@@ -39,7 +40,7 @@ export function InvitePage() {
     void api
       .getInvite(token)
       .then((r) => setInfo(r.invitation))
-      .catch((err) => setError(err instanceof Error ? err.message : "Invalid invite"));
+      .catch((err) => setError(errMessage(err, "Invalid invite")));
   }, [token]);
 
   async function accept() {
@@ -50,7 +51,7 @@ export function InvitePage() {
       setMessage("Joined workspace.");
       navigate(`/workspaces/${res.workspaceId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not accept invite");
+      setError(errMessage(err, "Could not accept invite"));
     }
   }
 
@@ -253,7 +254,7 @@ export function SharePage() {
       setPreviewError("");
     } catch (err) {
       setPayload(null);
-      setPreviewError(err instanceof Error ? err.message : "Preview unavailable");
+      setPreviewError(errMessage(err, "Preview unavailable"));
     }
   }
 
@@ -282,7 +283,7 @@ export function SharePage() {
           void loadPreview(token, docs[0].id);
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "This link is invalid or has expired"))
+      .catch((err) => setError(errMessage(err, "This link is invalid or has expired")))
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -313,7 +314,7 @@ export function SharePage() {
         void loadPreview(token, docs[0].id);
       }
     } catch (err) {
-      setPasswordError(err instanceof Error ? err.message : "Invalid password");
+      setPasswordError(errMessage(err, "Invalid password"));
     } finally {
       setUnlocking(false);
     }

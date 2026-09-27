@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type InputHTMLAttributes } from "react";
 import { Check, CloudUpload, Loader2, X } from "lucide-react";
-import { getIcon } from "material-file-icons";
 import { api } from "../api";
 import type { FolderItem } from "../api";
+import { errMessage } from "../helpers/errors";
+import { FileTypeIcon } from "./FileTypeIcon";
 import {
   collectFromDataTransfer,
   collectFromFileList,
@@ -37,16 +38,6 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileIcon({ filename }: { filename: string }) {
-  const icon = getIcon(filename);
-  return (
-    <span
-      className="file-type-icon"
-      aria-hidden
-      dangerouslySetInnerHTML={{ __html: icon.svg }}
-    />
-  );
-}
 
 function makeId(file: File, relativePath: string) {
   return `${relativePath}${file.name}_${file.size}_${file.lastModified}_${Math.random().toString(36).slice(2, 8)}`;
@@ -266,7 +257,7 @@ export function UploadModal({
             ? {
                 ...q,
                 status: "failed",
-                error: err instanceof Error ? err.message : "Upload failed",
+                error: errMessage(err, "Upload failed"),
               }
             : q,
         ),
@@ -382,7 +373,7 @@ export function UploadModal({
             <div className="upload-file-list">
               {queue.map((item) => (
                 <div key={item.id} className={`upload-file-row status-${item.status}`}>
-                  <FileIcon filename={item.name} />
+                  <FileTypeIcon filename={item.name} />
                   <div className="upload-file-middle">
                     <div className="upload-file-labels">
                       <span className="upload-file-name" title={item.name}>

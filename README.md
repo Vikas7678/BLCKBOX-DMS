@@ -30,6 +30,8 @@ One compose file starts **Postgres, Redis, API, Web, OnlyOffice, and nginx**. On
 
 Gateway configs: [`nginx/local.conf`](nginx/local.conf), [`nginx/ssl.conf`](nginx/ssl.conf), [`nginx/certbot.conf`](nginx/certbot.conf). Details: [`nginx/README.md`](nginx/README.md).
 
+Optional host-only helpers (not needed with full stack): [`docker-compose-only-office/`](docker-compose-only-office/) and [`docker-compose-redis/`](docker-compose-redis/).
+
 After editing an nginx conf while the gateway is already up:
 
 ```bash

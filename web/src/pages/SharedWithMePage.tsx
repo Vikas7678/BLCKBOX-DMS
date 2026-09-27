@@ -5,13 +5,11 @@ import { api } from "../api";
 import type { SharedWithMeItem } from "../api";
 import { toast } from "../toast";
 import { PaginationBar } from "../components/PaginationBar";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
 import emptySharedWithMeImg from "../assets/empty-shared-with-me.svg";
+import { errMessage } from "../helpers/errors";
+import { formatDateTime } from "../helpers/date";
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString();
-}
 
 export function SharedWithMePage() {
   const [shares, setShares] = useState<SharedWithMeItem[]>([]);
@@ -26,14 +24,9 @@ export function SharedWithMePage() {
     try {
       const res = await api.listSharedWithMe({ page });
       setShares(res.shares);
-      setMeta({
-        page: res.page,
-        limit: res.limit,
-        total: res.total,
-        totalPages: res.totalPages,
-      });
+      setMeta(toPaginationMeta(res));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load");
+      toast.error(errMessage(err, "Failed to load"));
     } finally {
       setLoading(false);
     }
@@ -44,14 +37,9 @@ export function SharedWithMePage() {
     try {
       const res = await api.listSharedWithMe({ page });
       setShares(res.shares);
-      setMeta({
-        page: res.page,
-        limit: res.limit,
-        total: res.total,
-        totalPages: res.totalPages,
-      });
+      setMeta(toPaginationMeta(res));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(errMessage(err, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
@@ -128,7 +116,7 @@ export function SharedWithMePage() {
                 <td>
                   {s.sharedBy.name} ({s.sharedBy.email})
                 </td>
-                <td className="muted">{formatDate(s.expiresAt)}</td>
+                <td className="muted">{formatDateTime(s.expiresAt)}</td>
                 <td className="muted">{s.message || "—"}</td>
               </tr>
             ))}

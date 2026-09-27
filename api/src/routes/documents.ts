@@ -8,7 +8,7 @@ import { config } from "../config";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { HttpError } from "../middleware/error";
-import { canAccessDocument, canManageDocument, canDeleteDocument, requireDocumentAccess, requireMembership, canAccessTrashedDocument } from "../services/access";
+import { canAccessDocument, canManageDocument, canDeleteDocument, requireDocumentAccess, requireMembership, canAccessTrashedDocument, isInternalShareOnlyAccess } from "../services/access";
 import { canAccessTrash, canDeleteContent, getPlatformRole } from "../services/platform";
 import { enqueuePurgeJob, type PurgeItem } from "../queue/purgeQueue";
 import { assertUniqueNameAtLevel } from "../services/names";
@@ -215,7 +215,7 @@ documentsRouter.get("/trash", async (req, res, next) => {
         : Promise.resolve([]),
     ]);
 
-    // Like Angora isVisibleInList: only show the root of a cascaded delete,
+    // Only show the root of a cascaded delete in trash lists
     // not every nested folder/file that was soft-deleted with it.
     const deletedFolderIds = new Set(folders.map((f) => f.id));
     const visibleFolders = folders.filter(
@@ -809,6 +809,7 @@ documentsRouter.get("/:id", async (req, res, next) => {
         updatedAt: doc.updatedAt,
         canManage: await canManageDocument(doc, req.user!.id),
         canDelete: await canDeleteDocument(doc, req.user!.id),
+        accessViaInternalShare: await isInternalShareOnlyAccess(doc, req.user!.id),
       },
     });
   } catch (err) {

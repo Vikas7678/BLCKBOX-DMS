@@ -9,6 +9,7 @@ import { AddUsersModal } from "../components/AddUsersModal";
 import { SearchableDropdown } from "../components/SearchableDropdown";
 import { confirmDanger } from "../alertify";
 import { toast } from "../toast";
+import { errMessage } from "../helpers/errors";
 
 type Tab = "edit" | "permissions";
 
@@ -65,7 +66,7 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
 
   useEffect(() => {
     void load().catch((err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to load"),
+      toast.error(errMessage(err, "Failed to load")),
     );
   }, [id]);
 
@@ -78,7 +79,7 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
       toast.success("Changes saved");
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
+      toast.error(errMessage(err, "Save failed"));
     } finally {
       setSaving(false);
     }
@@ -95,7 +96,7 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
             toast.success("Workspace deleted");
             navigate("/");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Delete failed");
+            toast.error(errMessage(err, "Delete failed"));
           }
         })();
       },
@@ -143,7 +144,7 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
       toast.success("Permissions saved");
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save permissions");
+      toast.error(errMessage(err, "Could not save permissions"));
     } finally {
       setSaving(false);
     }
@@ -163,7 +164,7 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
           toast.success("Member removed");
           await load();
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Could not remove member");
+          toast.error(errMessage(err, "Could not remove member"));
         } finally {
           setBusyId(null);
         }

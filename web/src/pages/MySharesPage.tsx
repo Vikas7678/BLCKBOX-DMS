@@ -6,13 +6,11 @@ import type { MyShareItem } from "../api";
 import { toast } from "../toast";
 import { confirmDanger } from "../alertify";
 import { PaginationBar } from "../components/PaginationBar";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
 import emptyMySharesImg from "../assets/empty-my-shares.svg";
+import { errMessage } from "../helpers/errors";
+import { formatDateTime } from "../helpers/date";
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString();
-}
 
 function shareDocs(s: MyShareItem) {
   if (s.documents?.length) return s.documents;
@@ -41,15 +39,10 @@ export function MySharesPage() {
     try {
       const res = await api.listMyShares({ page });
       setShares(res.shares);
-      setMeta({
-        page: res.page,
-        limit: res.limit,
-        total: res.total,
-        totalPages: res.totalPages,
-      });
+      setMeta(toPaginationMeta(res));
       setSelected(new Set());
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load shares");
+      toast.error(errMessage(err, "Failed to load shares"));
     } finally {
       setLoading(false);
     }
@@ -60,15 +53,10 @@ export function MySharesPage() {
     try {
       const res = await api.listMyShares({ page });
       setShares(res.shares);
-      setMeta({
-        page: res.page,
-        limit: res.limit,
-        total: res.total,
-        totalPages: res.totalPages,
-      });
+      setMeta(toPaginationMeta(res));
       setSelected(new Set());
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(errMessage(err, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
@@ -120,7 +108,7 @@ export function MySharesPage() {
           toast.success(`Revoked ${items.length} share(s)`);
           await load();
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Revoke failed");
+          toast.error(errMessage(err, "Revoke failed"));
         } finally {
           setBusy(false);
         }
@@ -247,7 +235,7 @@ export function MySharesPage() {
                       : s.recipientEmail || "—"}
                   </td>
                   <td className="muted">{flags || "—"}</td>
-                  <td className="muted">{formatDate(s.expiresAt)}</td>
+                  <td className="muted">{formatDateTime(s.expiresAt)}</td>
                   <td>{s.status}</td>
                   <td className="col-actions">
                     {s.url && s.status === "active" && s.kind === "external" ? (

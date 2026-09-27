@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../AuthContext";
 import { PasswordInput } from "../components/PasswordInput";
+import { errMessage } from "../helpers/errors";
 
 export function LoginPage() {
   const { setUser } = useAuth();
@@ -24,7 +25,7 @@ export function LoginPage() {
       const next = search.get("next") || "/";
       navigate(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(errMessage(err, "Login failed"));
     } finally {
       setBusy(false);
     }

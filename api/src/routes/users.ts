@@ -321,7 +321,7 @@ usersRouter.put("/:id/enable", async (req, res, next) => {
 });
 
 /**
- * Archive user (Angora “delete”): permanent soft tombstone.
+ * Archive user (“delete”): permanent soft tombstone.
  * Clears credentials, removes workspace memberships, revokes shares, force-ends sessions.
  * Keeps name/email for history; cannot re-enable.
  */
@@ -351,7 +351,7 @@ usersRouter.delete("/:id", async (req, res, next) => {
         },
       });
 
-      // Remove from all workspaces (Angora: pull from all groups)
+      // Remove from all workspaces
       await tx.workspaceMember.deleteMany({ where: { userId: target.id } });
 
       // Revoke internal shares involving this user

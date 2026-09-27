@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { ChevronDown, Folder, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
-import { getIcon } from "material-file-icons";
 import { api } from "../api";
 import type { TrashDocumentItem, TrashFolderItem } from "../api";
 import { useAuth } from "../AuthContext";
@@ -10,8 +9,11 @@ import { usePurgeSettledRefresh } from "../realtime";
 import { confirmDanger } from "../alertify";
 import { toast } from "../toast";
 import { PaginationBar } from "../components/PaginationBar";
-import { emptyMeta, type PaginationMeta } from "../pagination";
+import {emptyMeta, type PaginationMeta, toPaginationMeta} from "../pagination";
 import emptyTrashImg from "../assets/empty-trash.svg";
+import { errMessage } from "../helpers/errors";
+import { formatDate } from "../helpers/date";
+import { FileTypeIcon } from "../components/FileTypeIcon";
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -19,14 +21,6 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(iso?: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
 
 type TrashRow =
   | { kind: "folder"; item: TrashFolderItem }
@@ -34,16 +28,6 @@ type TrashRow =
 
 type SelectionKey = `doc:${string}` | `folder:${string}`;
 
-function FileTypeIcon({ filename }: { filename: string }) {
-  const icon = getIcon(filename);
-  return (
-    <span
-      className="file-type-icon"
-      aria-hidden
-      dangerouslySetInnerHTML={{ __html: icon.svg }}
-    />
-  );
-}
 
 export function TrashPage() {
   const { user } = useAuth();
@@ -66,12 +50,7 @@ export function TrashPage() {
     const res = await api.listTrash({ page: p, q });
     setDocs(res.documents);
     setFolders(res.folders);
-    setMeta({
-      page: res.page,
-      limit: res.limit,
-      total: res.total,
-      totalPages: res.totalPages,
-    });
+    setMeta(toPaginationMeta(res));
   }
 
   usePurgeSettledRefresh(() => {
@@ -81,7 +60,7 @@ export function TrashPage() {
   useEffect(() => {
     if (!allowed) return;
     void load().catch((err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to load trash"),
+      toast.error(errMessage(err, "Failed to load trash")),
     );
   }, [allowed, page, appliedQ]);
 
@@ -147,7 +126,7 @@ export function TrashPage() {
     try {
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(errMessage(err, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
@@ -160,7 +139,7 @@ export function TrashPage() {
       toast.success("Document restored");
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Restore failed");
+      toast.error(errMessage(err, "Restore failed"));
     } finally {
       setBusyId(null);
     }
@@ -173,7 +152,7 @@ export function TrashPage() {
       toast.success("Folder restored");
       await load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Restore failed");
+      toast.error(errMessage(err, "Restore failed"));
     } finally {
       setBusyId(null);
     }
@@ -193,7 +172,7 @@ export function TrashPage() {
             return next;
           });
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusyId(null);
         }
@@ -215,7 +194,7 @@ export function TrashPage() {
             return next;
           });
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Delete failed");
+          toast.error(errMessage(err, "Delete failed"));
         } finally {
           setBusyId(null);
         }
@@ -243,7 +222,7 @@ export function TrashPage() {
         setSelected(new Set());
         await load();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Restore failed");
+        toast.error(errMessage(err, "Restore failed"));
       } finally {
         setBusyId(null);
       }
@@ -276,7 +255,7 @@ export function TrashPage() {
             setSelected(new Set());
             await load();
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Delete failed");
+            toast.error(errMessage(err, "Delete failed"));
           } finally {
             setBusyId(null);
           }

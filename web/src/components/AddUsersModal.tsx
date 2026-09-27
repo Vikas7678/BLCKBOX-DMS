@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { api } from "../api";
 import { SearchableDropdown, type SearchableOption } from "./SearchableDropdown";
+import { errMessage } from "../helpers/errors";
 
 type PickerUser = { id: string; email: string; name: string };
 
@@ -43,7 +44,7 @@ export function AddUsersModal({
           setError("");
         })
         .catch((err) => {
-          setError(err instanceof Error ? err.message : "Failed to load users");
+          setError(errMessage(err, "Failed to load users"));
           setOptions([]);
         });
     },

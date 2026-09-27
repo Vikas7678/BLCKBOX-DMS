@@ -3,7 +3,7 @@ import { HttpError } from "../middleware/error";
 import { emitToUser, disconnectUserSockets } from "../realtime/socket";
 
 /**
- * Invalidate JWTs for a user (Angora force-end session) and kick sockets.
+ * Invalidate JWTs for a user (force-end session) and kick sockets.
  * Call after bumping `sessionVersion` in the DB.
  */
 export async function forceEndUserSession(

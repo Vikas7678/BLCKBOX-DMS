@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { WorkspaceItem } from "../api";
+import { errMessage } from "../helpers/errors";
 
 export function SearchPage() {
   const [searchParams] = useSearchParams();
@@ -15,7 +16,7 @@ export function SearchPage() {
     void api
       .listWorkspaces({ limit: 100 })
       .then((r) => setWorkspaces(r.workspaces))
-      .catch((err) => setError(err instanceof Error ? err.message : "Search failed"))
+      .catch((err) => setError(errMessage(err, "Search failed")))
       .finally(() => setLoading(false));
   }, []);
 
