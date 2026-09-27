@@ -198,11 +198,30 @@ function pathFromMetadata(metadata: unknown): string | null {
   return typeof path === "string" && path.trim() ? path.trim() : null;
 }
 
-export async function listRecentAuditActivity(limit = 10): Promise<RecentActivityItem[]> {
-  const cached = await getCachedRecentActivity<RecentActivityItem[]>();
+export async function listRecentAuditActivity(input: {
+  limit?: number;
+  userId: string;
+  platformRole: "admin" | "owner" | "member";
+  workspaceIds: string[];
+}): Promise<RecentActivityItem[]> {
+  const limit = input.limit ?? 10;
+  const cached = await getCachedRecentActivity<RecentActivityItem[]>(input.userId);
   if (cached) return cached;
 
+  const where =
+    input.platformRole === "admin"
+      ? undefined
+      : {
+          OR: [
+            { actorUserId: input.userId },
+            ...(input.workspaceIds.length
+              ? [{ workspaceId: { in: input.workspaceIds } }]
+              : []),
+          ],
+        };
+
   const rows = await prisma.auditLog.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     take: limit,
   });
@@ -230,6 +249,6 @@ export async function listRecentAuditActivity(limit = 10): Promise<RecentActivit
       };
     }),
   );
-  await setCachedRecentActivity(items);
+  await setCachedRecentActivity(input.userId, items);
   return items;
 }

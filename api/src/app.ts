@@ -32,16 +32,16 @@ export async function createApp() {
     res.json({ ok: true });
   });
 
-  app.use("/auth", authRouter);
-  app.use("/dashboard", dashboardRouter);
-  app.use("/users", usersRouter);
-  app.use("/settings", settingsRouter);
-  app.use("/shares", sharesRouter);
-  app.use("/audit-trails", auditRouter);
-  app.use("/documents", documentsRouter);
-  app.use("/workspaces", workspacesRouter);
-  app.use("/invites", invitesRouter);
-  app.use("/s", sharePublicRouter);
+  app.use("/api/auth", authRouter);
+  app.use("/api/dashboard", dashboardRouter);
+  app.use("/api/users", usersRouter);
+  app.use("/api/settings", settingsRouter);
+  app.use("/api/shares", sharesRouter);
+  app.use("/api/audit-trails", auditRouter);
+  app.use("/api/documents", documentsRouter);
+  app.use("/api/workspaces", workspacesRouter);
+  app.use("/api/invites", invitesRouter);
+  app.use("/api/s", sharePublicRouter);
 
   app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err instanceof ZodError) {

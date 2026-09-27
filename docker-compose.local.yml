@@ -1,0 +1,106 @@
+# Full stack — local HTTP (*.blckbox.localapp)
+# Usage:
+#   1. Add to /etc/hosts:  127.0.0.1  app.blckbox.localapp
+#   2. docker compose -f docker-compose.local.yml up -d --build
+#   3. Open http://app.blckbox.localapp
+#
+# Stop the old host-only nginx (blckbox-nginx-local) first if port 80 is taken.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: blckbox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blckbox
+      POSTGRES_PASSWORD: blckbox
+      POSTGRES_DB: blckbox
+    volumes:
+      - blckbox_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blckbox -d blckbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: blckbox-redis
+    restart: unless-stopped
+    volumes:
+      - blckbox_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+    container_name: blckbox-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: local
+      DATABASE_URL: postgresql://blckbox:blckbox@postgres:5432/blckbox
+      REDIS_URL: redis://redis:6379
+      API_PORT: "4000"
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      JWT_COOKIE_NAME: blckbox_token
+      JWT_EXPIRES_DAYS: "7"
+      CORS_ORIGIN: http://app.blckbox.localapp
+      PUBLIC_WEB_URL: http://app.blckbox.localapp
+      BROWSER_API_URL: http://app.blckbox.localapp/api
+      PUBLIC_API_URL: http://api:4000/api
+      ONLYOFFICE_URL: http://app.blckbox.localapp/onlyoffice
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-blckbox-onlyoffice-jwt-secret-change-me}
+      STORAGE_PATH: /app/data/uploads
+    volumes:
+      - blckbox_uploads:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: http://app.blckbox.localapp/api
+    container_name: blckbox-web
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  onlyoffice:
+    image: onlyoffice/documentserver:9.3.1
+    container_name: blckbox-onlyoffice
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-blckbox-onlyoffice-jwt-secret-change-me}
+      JWT_HEADER: AuthorizationJwt
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      ALLOW_META_IP_ADDRESS: "true"
+    volumes:
+      - ./docker-compose-only-office/default.json:/etc/onlyoffice/documentserver/default.json:ro
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: blckbox-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/local.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+      - api
+      - onlyoffice
+
+volumes:
+  blckbox_pg_data:
+  blckbox_redis_data:
+  blckbox_uploads:

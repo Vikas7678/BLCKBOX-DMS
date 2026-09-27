@@ -4,7 +4,7 @@ version: "3.8"
 # From this folder: docker compose -f docker-compose-onlyoffice-local.yml up -d
 #
 # Document Server is at http://localhost:8080
-# It fetches files via PUBLIC_API_URL (host.docker.internal:4000).
+# It fetches files via PUBLIC_API_URL (host.docker.internal:4000/api).
 
 services:
   onlyoffice-documentserver:

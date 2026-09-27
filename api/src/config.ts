@@ -20,9 +20,9 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
   publicWebUrl: process.env.PUBLIC_WEB_URL ?? "http://localhost:5173",
   /** Base URL Document Server uses to fetch files (host.docker.internal from the OO container). */
-  publicApiUrl: process.env.PUBLIC_API_URL ?? "http://host.docker.internal:4000",
+  publicApiUrl: process.env.PUBLIC_API_URL ?? "http://host.docker.internal:4000/api",
   /** Browser-facing API URL (image preview, etc.). */
-  browserApiUrl: process.env.BROWSER_API_URL ?? "http://localhost:4000",
+  browserApiUrl: process.env.BROWSER_API_URL ?? "http://localhost:4000/api",
   /** Browser-facing Document Server URL. */
   onlyOfficeUrl: process.env.ONLYOFFICE_URL ?? "http://localhost:8080",
   /** Must match JWT_SECRET in docker-compose-only-office. */

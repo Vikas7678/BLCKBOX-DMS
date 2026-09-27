@@ -38,6 +38,33 @@ npm run dev
 - Web UI: http://localhost:5173  
 - API: http://localhost:4000  
 
+### Nginx gateway (optional, Angora-style)
+
+#### Full Docker stack (recommended)
+
+One compose file runs Postgres, Redis, API, Web, OnlyOffice, and nginx:
+
+```bash
+# /etc/hosts
+127.0.0.1  app.blckbox.localapp
+
+# stop any old nginx using port 80
+docker stop blckbox-nginx-local 2>/dev/null || true
+
+docker compose -f docker-compose.local.yml up -d --build
+# → http://app.blckbox.localapp
+```
+
+| File | Domain | TLS |
+| ---- | ------ | --- |
+| [`docker-compose.local.yml`](docker-compose.local.yml) | `app.blckbox.localapp` | HTTP |
+| [`docker-compose.ssl.yml`](docker-compose.ssl.yml) | `blckbox.dms.com` | Pre-placed `/etc/nginx/certs/` |
+| [`docker-compose.certbot.yml`](docker-compose.certbot.yml) | `blckbox.dms.com` | Let’s Encrypt |
+
+Copy [`.env.docker.example`](.env.docker.example) → `.env` for secrets (`JWT_SECRET`, etc.).
+
+Gateway nginx configs live under [`nginx/`](nginx/) (`local.conf`, `ssl.conf`, `certbot.conf`). See [`nginx/README.md`](nginx/README.md).
+
 ### OnlyOffice preview (optional)
 
 Office/PDF preview uses OnlyOffice Document Server. From the repo root:
@@ -52,7 +79,7 @@ Document Server: http://localhost:8080
 Ensure `api/.env` has matching secrets (see `.env.example`):
 
 ```
-PUBLIC_API_URL=http://host.docker.internal:4000
+PUBLIC_API_URL=http://host.docker.internal:4000/api
 ONLYOFFICE_URL=http://localhost:8080
 ONLYOFFICE_JWT_SECRET=blckbox-onlyoffice-jwt-secret-change-me
 ```
@@ -193,9 +220,9 @@ Why: external sharing is the highest-risk flow; a simple password is a realistic
 
 ## API sketch
 
-- `POST /auth/register|login|logout`, `GET /auth/me`
-- `GET/POST /documents`, `GET /documents/:id/download`, `DELETE /documents/:id`
-- `POST /documents/:id/share-links`, `DELETE /documents/share-links/:linkId`
-- `GET/POST /workspaces`, members + invitations
-- `GET /invites/:token`, `POST /invites/:token/accept`
-- `GET /s/:token`, `POST /s/:token/unlock`, `GET /s/:token/download`
+- `POST /api/auth/register|login|logout`, `GET /api/auth/me`
+- `GET/POST /api/documents`, `GET /api/documents/:id/download`, `DELETE /api/documents/:id`
+- `POST /api/documents/:id/share-links`, `DELETE /api/documents/share-links/:linkId`
+- `GET/POST /api/workspaces`, members + invitations
+- `GET /api/invites/:token`, `POST /api/invites/:token/accept`
+- `GET /api/s/:token`, `POST /api/s/:token/unlock`, `GET /api/s/:token/download`

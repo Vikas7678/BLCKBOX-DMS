@@ -12,7 +12,11 @@ function listKey(entityType: AuditEntityType, entityId: string, version: string,
   return `audit:list:${entityType}:${entityId}:v${version}:p${page}:l${limit}`;
 }
 
-const RECENT_KEY = "audit:recent:dashboard:v4";
+const RECENT_KEY_PREFIX = "audit:recent:dashboard:v5:";
+
+function recentKey(userId: string) {
+  return `${RECENT_KEY_PREFIX}${userId}`;
+}
 
 export async function getAuditListCacheVersion(
   entityType: AuditEntityType,
@@ -58,9 +62,9 @@ export async function setCachedAuditList(
   }
 }
 
-export async function getCachedRecentActivity<T>(): Promise<T | null> {
+export async function getCachedRecentActivity<T>(userId: string): Promise<T | null> {
   try {
-    const raw = await getRedisConnection().get(RECENT_KEY);
+    const raw = await getRedisConnection().get(recentKey(userId));
     if (!raw) return null;
     return JSON.parse(raw) as T;
   } catch {
@@ -68,9 +72,14 @@ export async function getCachedRecentActivity<T>(): Promise<T | null> {
   }
 }
 
-export async function setCachedRecentActivity(payload: unknown): Promise<void> {
+export async function setCachedRecentActivity(userId: string, payload: unknown): Promise<void> {
   try {
-    await getRedisConnection().set(RECENT_KEY, JSON.stringify(payload), "EX", RECENT_TTL_SECONDS);
+    await getRedisConnection().set(
+      recentKey(userId),
+      JSON.stringify(payload),
+      "EX",
+      RECENT_TTL_SECONDS,
+    );
   } catch {
     // ignore
   }
@@ -83,7 +92,8 @@ export async function invalidateAuditCaches(
   try {
     const redis = getRedisConnection();
     await redis.incr(verKey(entityType, entityId));
-    await redis.del(RECENT_KEY);
+    const keys = await redis.keys(`${RECENT_KEY_PREFIX}*`);
+    if (keys.length) await redis.del(...keys);
   } catch {
     // ignore
   }

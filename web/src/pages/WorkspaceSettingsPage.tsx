@@ -6,6 +6,7 @@ import { api } from "../api";
 import type { MemberItem, WorkspaceItem } from "../api";
 import { useAuth } from "../AuthContext";
 import { AddUsersModal } from "../components/AddUsersModal";
+import { SearchableDropdown } from "../components/SearchableDropdown";
 import { confirmDanger } from "../alertify";
 import { toast } from "../toast";
 
@@ -16,6 +17,12 @@ type PendingMember = {
   user: { id: string; email: string; name: string };
   role: "owner" | "admin" | "member";
 };
+
+const ROLE_OPTIONS = [
+  { value: "owner" as const, label: "owner" },
+  { value: "admin" as const, label: "admin" },
+  { value: "member" as const, label: "member" },
+];
 
 export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
   const { id } = useParams();
@@ -259,25 +266,20 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
                   </td>
                   <td className="muted">User</td>
                   <td>
-                    <select
+                    <SearchableDropdown
+                      searchable={false}
                       value={p.role}
-                      onChange={(e) =>
+                      options={ROLE_OPTIONS}
+                      aria-label={`Role for ${p.user.name}`}
+                      onChange={(role) => {
+                        if (!role) return;
                         setPending((prev) =>
                           prev.map((row) =>
-                            row.tempId === p.tempId
-                              ? {
-                                  ...row,
-                                  role: e.target.value as PendingMember["role"],
-                                }
-                              : row,
+                            row.tempId === p.tempId ? { ...row, role } : row,
                           ),
-                        )
-                      }
-                    >
-                      <option value="owner">owner</option>
-                      <option value="admin">admin</option>
-                      <option value="member">member</option>
-                    </select>
+                        );
+                      }}
+                    />
                   </td>
                   {canManage && (
                     <td className="col-perm-actions">
@@ -305,17 +307,17 @@ export function WorkspaceSettingsPage({ tab }: { tab: Tab }) {
                   </td>
                   <td className="muted">User</td>
                   <td>
-                    <select
-                      value={roleDrafts[m.id] ?? m.role}
+                    <SearchableDropdown
+                      searchable={false}
+                      value={(roleDrafts[m.id] ?? m.role) as "owner" | "admin" | "member"}
+                      options={ROLE_OPTIONS}
                       disabled={!canManage}
-                      onChange={(e) =>
-                        setRoleDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))
-                      }
-                    >
-                      <option value="owner">owner</option>
-                      <option value="admin">admin</option>
-                      <option value="member">member</option>
-                    </select>
+                      aria-label={`Role for ${m.user.name}`}
+                      onChange={(role) => {
+                        if (!role) return;
+                        setRoleDrafts((prev) => ({ ...prev, [m.id]: role }));
+                      }}
+                    />
                   </td>
                   {canManage && (
                     <td className="col-perm-actions">

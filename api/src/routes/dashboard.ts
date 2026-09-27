@@ -19,18 +19,25 @@ dashboardRouter.get("/", async (req, res, next) => {
         select: { id: true },
       });
       workspaceIds = all.map((w) => w.id);
-    } else if (platformRole === "owner") {
-      const created = await prisma.workspace.findMany({
-        where: { deletedAt: null, createdById: userId },
-        select: { id: true },
-      });
-      workspaceIds = created.map((w) => w.id);
     } else {
-      const memberships = await prisma.workspaceMember.findMany({
-        where: { userId, workspace: { deletedAt: null } },
-        select: { workspaceId: true },
-      });
-      workspaceIds = memberships.map((m) => m.workspaceId);
+      const [memberships, created] = await Promise.all([
+        prisma.workspaceMember.findMany({
+          where: { userId, workspace: { deletedAt: null } },
+          select: { workspaceId: true },
+        }),
+        platformRole === "owner"
+          ? prisma.workspace.findMany({
+              where: { deletedAt: null, createdById: userId },
+              select: { id: true },
+            })
+          : Promise.resolve([] as { id: string }[]),
+      ]);
+      workspaceIds = [
+        ...new Set([
+          ...memberships.map((m) => m.workspaceId),
+          ...created.map((w) => w.id),
+        ]),
+      ];
     }
 
     const showTrash = canAccessTrash(platformRole);
@@ -84,7 +91,12 @@ dashboardRouter.get("/", async (req, res, next) => {
     ).length;
     const trashCount = showTrash ? visibleTrashDocs + visibleTrashFolders : 0;
 
-    const recentActivity = await listRecentAuditActivity(10);
+    const recentActivity = await listRecentAuditActivity({
+      limit: 10,
+      userId,
+      platformRole,
+      workspaceIds,
+    });
 
     res.json({
       stats: {

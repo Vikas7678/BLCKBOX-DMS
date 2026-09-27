@@ -1,7 +1,7 @@
 import type { PaginationMeta } from "./pagination";
 import { DEFAULT_PAGE_LIMIT } from "./pagination";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
 
 export type { PaginationMeta };
 

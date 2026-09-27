@@ -5,6 +5,7 @@ import { prisma } from "./lib/prisma";
 import { startPurgeWorker } from "./queue/purgeWorker";
 import { startAuditWorker } from "./queue/auditWorker";
 import { initSocket } from "./realtime/socket";
+import { seedBootstrapAdmin } from "./services/seed";
 
 async function main() {
   try {
@@ -12,6 +13,13 @@ async function main() {
     console.log("Database connected");
   } catch (err) {
     console.error("Database connection failed", err);
+    process.exit(1);
+  }
+
+  try {
+    await seedBootstrapAdmin();
+  } catch (err) {
+    console.error("Seed failed", err);
     process.exit(1);
   }
 

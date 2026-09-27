@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+coverage
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+.git
+.gitignore
+src/tests

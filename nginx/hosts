@@ -1,0 +1,11 @@
+# Replace __IP__ with your machine LAN IP, then append to /etc/hosts:
+#   sudo cp /etc/hosts /etc/hosts.bak
+#   sudo sh -c 'sed "s/__IP__/YOUR_IP/" /path/to/BLCKBOX/nginx/hosts >> /etc/hosts'
+#
+# Or edit manually:
+#   __IP__  app.blckbox.localapp
+#   __IP__  host.docker.internal
+
+__IP__	app.blckbox.localapp
+__IP__	www.blckbox.localapp
+__IP__	host.docker.internal

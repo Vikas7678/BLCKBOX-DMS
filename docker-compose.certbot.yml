@@ -1,0 +1,134 @@
+# Full stack — HTTPS via Let’s Encrypt (blckbox.dms.com)
+# Requires on host (DigitalOcean DNS plugin, Angora-style):
+#   /etc/nginx/digitalocean/credentials.ini
+#
+# First-time cert (optional one-shot):
+#   docker compose -f docker-compose.certbot.yml run --rm certbot
+#
+# Then:
+#   docker compose -f docker-compose.certbot.yml up -d --build
+#   Open https://blckbox.dms.com
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: blckbox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blckbox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blckbox}
+      POSTGRES_DB: blckbox
+    volumes:
+      - blckbox_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blckbox -d blckbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: blckbox-redis
+    restart: unless-stopped
+    volumes:
+      - blckbox_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+    container_name: blckbox-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://blckbox:${POSTGRES_PASSWORD:-blckbox}@postgres:5432/blckbox
+      REDIS_URL: redis://redis:6379
+      API_PORT: "4000"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      JWT_COOKIE_NAME: blckbox_token
+      JWT_EXPIRES_DAYS: "7"
+      CORS_ORIGIN: https://blckbox.dms.com
+      PUBLIC_WEB_URL: https://blckbox.dms.com
+      BROWSER_API_URL: https://blckbox.dms.com/api
+      PUBLIC_API_URL: http://api:4000/api
+      ONLYOFFICE_URL: https://blckbox.dms.com/onlyoffice
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?Set ONLYOFFICE_JWT_SECRET}
+      STORAGE_PATH: /app/data/uploads
+    volumes:
+      - blckbox_uploads:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: https://blckbox.dms.com/api
+    container_name: blckbox-web
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  onlyoffice:
+    image: onlyoffice/documentserver:9.3.1
+    container_name: blckbox-onlyoffice
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+      JWT_HEADER: AuthorizationJwt
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      ALLOW_META_IP_ADDRESS: "true"
+    volumes:
+      - ./docker-compose-only-office/default.json:/etc/onlyoffice/documentserver/default.json:ro
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: blckbox-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/certbot.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot
+    depends_on:
+      - web
+      - api
+      - onlyoffice
+
+  certbot:
+    image: certbot/dns-digitalocean:latest
+    container_name: blckbox-certbot
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /etc/nginx/digitalocean:/digitalocean:ro
+    profiles:
+      - certbot
+    command:
+      - certonly
+      - --dns-digitalocean
+      - --dns-digitalocean-credentials
+      - /digitalocean/credentials.ini
+      - -d
+      - blckbox.dms.com
+      - -d
+      - "*.blckbox.dms.com"
+      - --agree-tos
+      - --non-interactive
+      - --email
+      - ${CERTBOT_EMAIL:-admin@blckbox.dms.com}
+
+volumes:
+  blckbox_pg_data:
+  blckbox_redis_data:
+  blckbox_uploads:

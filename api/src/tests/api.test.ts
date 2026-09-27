@@ -30,14 +30,14 @@ async function createTestUser(
     data: { email, name, passwordHash, platformRole },
   });
   testUserIds.add(user.id);
-  const res = await request(app).post("/auth/login").send({ email, password: "password123" });
+  const res = await request(app).post("/api/auth/login").send({ email, password: "password123" });
   expect(res.status).toBe(200);
   const cookie = res.headers["set-cookie"][0] as string;
   return { user: res.body.user, cookie };
 }
 
 async function createWorkspace(cookie: string, name: string) {
-  const res = await request(app).post("/workspaces").set("Cookie", cookie).send({ name });
+  const res = await request(app).post("/api/workspaces").set("Cookie", cookie).send({ name });
   expect(res.status).toBe(201);
   return res.body.workspace.id as string;
 }
@@ -68,7 +68,7 @@ describe("API authz and sharing", () => {
     const workspaceId = await createWorkspace(a.cookie, "A team");
 
     const upload = await request(app)
-      .post("/documents")
+      .post("/api/documents")
       .set("Cookie", a.cookie)
       .attach("file", Buffer.from("secret-a"), "a.txt")
       .field("title", "A doc")
@@ -77,12 +77,12 @@ describe("API authz and sharing", () => {
     const docId = upload.body.document.id as string;
 
     const denied = await request(app)
-      .get(`/documents/${docId}/download`)
+      .get(`/api/documents/${docId}/download`)
       .set("Cookie", b.cookie);
     expect(denied.status).toBe(403);
 
     const allowed = await request(app)
-      .get(`/documents/${docId}/download`)
+      .get(`/api/documents/${docId}/download`)
       .set("Cookie", a.cookie);
     expect(allowed.status).toBe(200);
     expect(allowed.text).toBe("secret-a");
@@ -92,7 +92,7 @@ describe("API authz and sharing", () => {
     const a = await createTestUser(`share-${Date.now()}@example.com`, "Sharer");
     const workspaceId = await createWorkspace(a.cookie, "Share ws");
     const upload = await request(app)
-      .post("/documents")
+      .post("/api/documents")
       .set("Cookie", a.cookie)
       .attach("file", Buffer.from("shared"), "s.txt")
       .field("workspaceId", workspaceId);
@@ -100,22 +100,22 @@ describe("API authz and sharing", () => {
     const docId = upload.body.document.id as string;
 
     const openLink = await request(app)
-      .post(`/documents/${docId}/share-links`)
+      .post(`/api/documents/${docId}/share-links`)
       .set("Cookie", a.cookie)
       .send({ expiresAt: new Date(Date.now() + 86400000).toISOString() });
     expect(openLink.status).toBe(201);
     const openToken = openLink.body.shareLink.token as string;
 
-    const openMeta = await request(app).get(`/s/${openToken}`);
+    const openMeta = await request(app).get(`/api/s/${openToken}`);
     expect(openMeta.status).toBe(200);
     expect(openMeta.body.share.needsPassword).toBe(false);
 
-    const openDl = await request(app).get(`/s/${openToken}/download`);
+    const openDl = await request(app).get(`/api/s/${openToken}/download`);
     expect(openDl.status).toBe(200);
     expect(openDl.text).toBe("shared");
 
     const locked = await request(app)
-      .post(`/documents/${docId}/share-links`)
+      .post(`/api/documents/${docId}/share-links`)
       .set("Cookie", a.cookie)
       .send({
         password: "secret1",
@@ -124,23 +124,23 @@ describe("API authz and sharing", () => {
     expect(locked.status).toBe(201);
     const lockedToken = locked.body.shareLink.token as string;
 
-    const needsPw = await request(app).get(`/s/${lockedToken}`);
+    const needsPw = await request(app).get(`/api/s/${lockedToken}`);
     expect(needsPw.body.share.needsPassword).toBe(true);
 
-    const wrong = await request(app).post(`/s/${lockedToken}/unlock`).send({ password: "nope" });
+    const wrong = await request(app).post(`/api/s/${lockedToken}/unlock`).send({ password: "nope" });
     expect(wrong.status).toBe(401);
 
-    const unlock = await request(app).post(`/s/${lockedToken}/unlock`).send({ password: "secret1" });
+    const unlock = await request(app).post(`/api/s/${lockedToken}/unlock`).send({ password: "secret1" });
     expect(unlock.status).toBe(200);
     const unlockCookie = unlock.headers["set-cookie"][0] as string;
 
-    const lockedDl = await request(app).get(`/s/${lockedToken}/download`).set("Cookie", unlockCookie);
+    const lockedDl = await request(app).get(`/api/s/${lockedToken}/download`).set("Cookie", unlockCookie);
     expect(lockedDl.status).toBe(200);
 
     await request(app)
-      .delete(`/documents/share-links/${openLink.body.shareLink.id}`)
+      .delete(`/api/documents/share-links/${openLink.body.shareLink.id}`)
       .set("Cookie", a.cookie);
-    const revoked = await request(app).get(`/s/${openToken}`);
+    const revoked = await request(app).get(`/api/s/${openToken}`);
     expect(revoked.status).toBe(404);
   });
 
@@ -151,7 +151,7 @@ describe("API authz and sharing", () => {
     const workspaceId = await createWorkspace(owner.cookie, "Team");
 
     const invite = await request(app)
-      .post(`/workspaces/${workspaceId}/invitations`)
+      .post(`/api/workspaces/${workspaceId}/invitations`)
       .set("Cookie", owner.cookie)
       .send({ email: inviteeEmail, role: "admin" });
     expect(invite.status).toBe(201);
@@ -159,13 +159,13 @@ describe("API authz and sharing", () => {
 
     const invitee = await createTestUser(inviteeEmail, "Invitee", "member");
     const accept = await request(app)
-      .post(`/invites/${token}/accept`)
+      .post(`/api/invites/${token}/accept`)
       .set("Cookie", invitee.cookie);
     expect(accept.status).toBe(200);
     expect(accept.body.workspaceId).toBe(workspaceId);
 
     const members = await request(app)
-      .get(`/workspaces/${workspaceId}/members`)
+      .get(`/api/workspaces/${workspaceId}/members`)
       .set("Cookie", owner.cookie);
     expect(members.status).toBe(200);
     const found = members.body.members.find(
@@ -174,11 +174,11 @@ describe("API authz and sharing", () => {
     expect(found?.role).toBe("admin");
   });
 
-  it("admin can create a user and public register is blocked when users exist", async () => {
+  it("admin can create a user and public register is always blocked", async () => {
     const admin = await createTestUser(`admin-create-${Date.now()}@example.com`, "Admin");
     const email = `created-${Date.now()}@example.com`;
     const created = await request(app)
-      .post("/users")
+      .post("/api/users")
       .set("Cookie", admin.cookie)
       .send({
         firstName: "New",
@@ -194,7 +194,7 @@ describe("API authz and sharing", () => {
     testUserIds.add(created.body.user.id as string);
 
     const blocked = await request(app)
-      .post("/auth/register")
+      .post("/api/auth/register")
       .send({ email: `blocked-${Date.now()}@example.com`, password: "password123", name: "Nope" });
     expect(blocked.status).toBe(403);
   });

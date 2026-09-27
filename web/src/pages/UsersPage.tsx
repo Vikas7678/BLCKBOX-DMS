@@ -8,6 +8,7 @@ import { canAccessUsers, canManageUsers } from "../permissions";
 import { confirmDanger } from "../alertify";
 import { PasswordInput } from "../components/PasswordInput";
 import { PaginationBar } from "../components/PaginationBar";
+import { SearchableDropdown } from "../components/SearchableDropdown";
 import { emptyMeta, type PaginationMeta } from "../pagination";
 import { toast } from "../toast";
 
@@ -24,6 +25,15 @@ function roleLabel(role: ColleagueUser["platformRole"]) {
   if (role === "owner") return "Owner";
   return "Member";
 }
+
+const PLATFORM_ROLE_OPTIONS: {
+  value: ColleagueUser["platformRole"];
+  label: string;
+}[] = [
+  { value: "admin", label: "Admin" },
+  { value: "owner", label: "Owner" },
+  { value: "member", label: "Member" },
+];
 
 const emptyForm = {
   firstName: "",
@@ -268,22 +278,18 @@ export function UsersPage() {
                   <td className="muted">{u.email}</td>
                   <td>
                     {canManage && !isSelf ? (
-                      <select
+                      <SearchableDropdown
                         className="users-role-select"
+                        searchable={false}
                         value={u.platformRole}
+                        options={PLATFORM_ROLE_OPTIONS}
                         disabled={busyId === u.id}
                         aria-label={`Role for ${u.name}`}
-                        onChange={(e) =>
-                          void changeRole(
-                            u,
-                            e.target.value as ColleagueUser["platformRole"],
-                          )
-                        }
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="owner">Owner</option>
-                        <option value="member">Member</option>
-                      </select>
+                        onChange={(role) => {
+                          if (!role) return;
+                          void changeRole(u, role);
+                        }}
+                      />
                     ) : (
                       <span className="users-role">{roleLabel(u.platformRole)}</span>
                     )}
@@ -401,21 +407,17 @@ export function UsersPage() {
                 <span>
                   Role <span className="req">*</span>
                 </span>
-                <select
+                <SearchableDropdown
                   className="users-role-select users-role-select--full"
+                  searchable={false}
                   value={form.platformRole}
-                  required
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      platformRole: e.target.value as ColleagueUser["platformRole"],
-                    }))
-                  }
-                >
-                  <option value="member">Member</option>
-                  <option value="owner">Owner</option>
-                  <option value="admin">Admin</option>
-                </select>
+                  options={PLATFORM_ROLE_OPTIONS}
+                  aria-label="Role"
+                  onChange={(role) => {
+                    if (!role) return;
+                    setForm((f) => ({ ...f, platformRole: role }));
+                  }}
+                />
               </label>
               <div className="folder-drawer-footer">
                 <button type="button" className="folder-drawer-cancel" onClick={closeCreate}>

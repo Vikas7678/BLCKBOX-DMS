@@ -4,7 +4,9 @@ import { api } from "./api";
 import { useAuth } from "./AuthContext";
 import { toast } from "./toast";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000/api";
+/** Socket.IO is mounted at the API host root, not under /api. */
+const SOCKET_URL = API_URL.replace(/\/api\/?$/, "") || API_URL;
 
 const PURGE_SETTLED_EVENT = "blckbox:purge-settled";
 
@@ -27,7 +29,7 @@ export function useRealtimeNotifications() {
   useEffect(() => {
     if (!user) return;
 
-    const socket: Socket = io(API_URL, {
+    const socket: Socket = io(SOCKET_URL, {
       withCredentials: true,
       path: "/socket.io",
       transports: ["websocket", "polling"],

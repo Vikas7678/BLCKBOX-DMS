@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { getIcon } from "material-file-icons";
 import { api } from "../api";
 import { PasswordInput } from "./PasswordInput";
+import { SearchableDropdown, type SearchableOption } from "./SearchableDropdown";
 import { toast } from "../toast";
 
 function defaultExpiryLocal(): string {
@@ -58,35 +59,33 @@ export function ShareModal({
   const [allowDownload, setAllowDownload] = useState(false);
   const [recipients, setRecipients] = useState<string[]>([]);
   const [recipientDraft, setRecipientDraft] = useState("");
-  const [userQuery, setUserQuery] = useState("");
-  const [userResults, setUserResults] = useState<{ id: string; email: string; name: string }[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<{ id: string; email: string; name: string }[]>(
     [],
   );
+  const [userOptions, setUserOptions] = useState<SearchableOption<string>[]>([]);
+  const selectedIdsRef = useRef<Set<string>>(new Set());
+  selectedIdsRef.current = new Set(selectedUsers.map((u) => u.id));
   const [busy, setBusy] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedIds = selectedUsers.map((u) => u.id).join(",");
 
-  useEffect(() => {
-    if (mode !== "internal") {
-      setUserResults([]);
-      return;
-    }
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      void api
-        .searchShareUsers(userQuery.trim())
-        .then((r) => {
-          const selected = new Set(selectedIds.split(",").filter(Boolean));
-          setUserResults(r.users.filter((u) => !selected.has(u.id)));
-        })
-        .catch(() => setUserResults([]));
-    }, 250);
-    return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-    };
-  }, [userQuery, mode, selectedIds]);
+  const loadShareUsers = useCallback((q: string) => {
+    void api
+      .searchShareUsers(q)
+      .then((r) => {
+        const selected = selectedIdsRef.current;
+        setUserOptions(
+          r.users
+            .filter((u) => !selected.has(u.id))
+            .map((u) => ({
+              value: u.id,
+              label: u.name || u.email,
+              sublabel: u.email,
+              data: u,
+            })),
+        );
+      })
+      .catch(() => setUserOptions([]));
+  }, []);
 
   function addRecipient(raw: string) {
     const email = raw.trim().toLowerCase();
@@ -258,51 +257,33 @@ export function ShareModal({
                 <span className="settings-label-text">
                   Share with <span className="req">*</span>
                 </span>
-                <div className="share-recipient-input">
-                  {selectedUsers.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      className="share-recipient-chip"
-                      onClick={() =>
-                        setSelectedUsers((prev) => prev.filter((x) => x.id !== u.id))
-                      }
-                      title="Remove"
-                    >
-                      {u.name || u.email} ×
-                    </button>
-                  ))}
-                  <input
-                    value={userQuery}
-                    onChange={(e) => setUserQuery(e.target.value)}
-                    placeholder={
-                      selectedUsers.length
-                        ? "Search to add another user"
-                        : "Search by name or email"
-                    }
-                    autoComplete="off"
-                  />
-                </div>
-                {userResults.length > 0 && (
-                  <ul className="share-user-results">
-                    {userResults.map((u) => (
-                      <li key={u.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedUsers((prev) =>
-                              prev.some((x) => x.id === u.id) ? prev : [...prev, u],
-                            );
-                            setUserQuery("");
-                          }}
-                        >
-                          <strong>{u.name}</strong>
-                          <span className="muted">{u.email}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <SearchableDropdown
+                  multiple
+                  values={selectedUsers.map((u) => u.id)}
+                  options={[
+                    ...selectedUsers.map((u) => ({
+                      value: u.id,
+                      label: u.name || u.email,
+                      sublabel: u.email,
+                      data: u,
+                    })),
+                    ...userOptions.filter(
+                      (o) => !selectedUsers.some((u) => u.id === o.value),
+                    ),
+                  ]}
+                  onSearch={loadShareUsers}
+                  placeholder="Select users…"
+                  searchPlaceholder="Search by name or email"
+                  aria-label="Share with users"
+                  onChange={(_ids, opts) => {
+                    setSelectedUsers(
+                      opts.map((o) => {
+                        const data = o.data as { id: string; email: string; name: string } | undefined;
+                        return data ?? { id: String(o.value), email: o.sublabel || "", name: o.label };
+                      }),
+                    );
+                  }}
+                />
               </label>
             ) : (
               <>
