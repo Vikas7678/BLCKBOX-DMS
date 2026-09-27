@@ -1,191 +1,159 @@
 # BLCKBOX — File Storage & Sharing
 
-Small full-stack take-home: upload documents, share them via copyable links (including password-protected links), and collaborate in workspaces.
+Small full-stack take-home: upload documents into workspaces, preview them, share with teammates or via public links (optional password), and track activity.
 
 Built with **Cursor** (Composer). See [How I worked with the coding agent](#how-i-worked-with-the-coding-agent) below.
 
-## How to run (local)
+## How to run (Docker)
 
-**Prerequisites:** Node.js 20+, a PostgreSQL database.
-
-If you don’t have Postgres handy, a one-off container is enough (the app itself is not dockerized yet):
+**Prerequisites:** Docker with Compose v2, port **80** free, and a hosts entry for local HTTP.
 
 ```bash
-docker run -d --name blckbox-postgres \
-  -e POSTGRES_USER=blckbox \
-  -e POSTGRES_PASSWORD=blckbox \
-  -e POSTGRES_DB=blckbox \
-  -p 5433:5432 \
-  postgres:16-alpine
-```
-
-Then:
-
-```bash
-cd api
-cp .env.example .env
-npm install
-npx prisma migrate deploy
-npm run dev
-
-# new terminal
-cd web
-cp .env.example .env
-npm install
-npm run dev
-```
-
-- Web UI: http://localhost:5173  
-- API: http://localhost:4000  
-
-### Nginx gateway (optional, Angora-style)
-
-#### Full Docker stack (recommended)
-
-One compose file runs Postgres, Redis, API, Web, OnlyOffice, and nginx:
-
-```bash
-# /etc/hosts
+# /etc/hosts (see also nginx/hosts)
 127.0.0.1  app.blckbox.localapp
+```
 
-# stop any old nginx using port 80
-docker stop blckbox-nginx-local 2>/dev/null || true
+```bash
+cp .env.docker.example .env   # JWT and other secrets
 
 docker compose -f docker-compose.local.yml up -d --build
 # → http://app.blckbox.localapp
 ```
 
-| File | Domain | TLS |
-| ---- | ------ | --- |
-| [`docker-compose.local.yml`](docker-compose.local.yml) | `app.blckbox.localapp` | HTTP |
-| [`docker-compose.ssl.yml`](docker-compose.ssl.yml) | `blckbox.dms.com` | Pre-placed `/etc/nginx/certs/` |
-| [`docker-compose.certbot.yml`](docker-compose.certbot.yml) | `blckbox.dms.com` | Let’s Encrypt |
+One compose file starts **Postgres, Redis, API, Web, OnlyOffice, and nginx**. On first API boot the entrypoint runs Prisma migrations and seeds a bootstrap admin.
 
-Copy [`.env.docker.example`](.env.docker.example) → `.env` for secrets (`JWT_SECRET`, etc.).
+| Stack | Compose file | Domain | TLS |
+| ----- | ------------ | ------ | --- |
+| Local | [`docker-compose.local.yml`](docker-compose.local.yml) | `app.blckbox.localapp` | HTTP |
+| SSL | [`docker-compose.ssl.yml`](docker-compose.ssl.yml) | `blckbox.dms.com` | Pre-placed certs under `/etc/nginx/certs/` |
+| Certbot | [`docker-compose.certbot.yml`](docker-compose.certbot.yml) | `blckbox.dms.com` | Let’s Encrypt |
 
-Gateway nginx configs live under [`nginx/`](nginx/) (`local.conf`, `ssl.conf`, `certbot.conf`). See [`nginx/README.md`](nginx/README.md).
+Gateway configs: [`nginx/local.conf`](nginx/local.conf), [`nginx/ssl.conf`](nginx/ssl.conf), [`nginx/certbot.conf`](nginx/certbot.conf). Details: [`nginx/README.md`](nginx/README.md).
 
-### OnlyOffice preview (optional)
-
-Office/PDF preview uses OnlyOffice Document Server. From the repo root:
+After editing an nginx conf while the gateway is already up:
 
 ```bash
-cd docker-compose-only-office
-docker compose -f docker-compose-onlyoffice-local.yml up -d
+docker exec blckbox-gateway nginx -s reload
 ```
 
-Document Server: http://localhost:8080  
+### Default admin
 
-Ensure `api/.env` has matching secrets (see `.env.example`):
+Public registration is **disabled**. Accounts are created by an admin (Users page).
 
-```
-PUBLIC_API_URL=http://host.docker.internal:4000/api
-ONLYOFFICE_URL=http://localhost:8080
-ONLYOFFICE_JWT_SECRET=blckbox-onlyoffice-jwt-secret-change-me
-```
+| Field | Value |
+| ----- | ----- |
+| Email | `vikaskumar9891452674@gmail.com` |
+| Password | `Vikas@123` |
 
-Click a file name in a workspace to open the preview.
+Seed is idempotent (safe on every API restart).
 
-Each package has its own `.env` (`api/.env`, `web/.env`). Defaults expect Postgres at `postgresql://blckbox:blckbox@localhost:5433/blckbox`.
-
-### Tests
+### Tests (optional, on the host)
 
 ```bash
 cd api
+cp .env.example .env   # if you need a local DB for tests
+npm install
 npm test
 ```
 
 ## Architecture overview
 
 ```
-React (Vite)  --cookie JWT-->  Express API  -->  PostgreSQL (Prisma)
-                                    |
-                              StorageService
-                                    |
-                              Local disk (./data/uploads)
+Browser
+   │
+   ▼
+nginx (gateway)
+   ├── /              → web (React SPA)
+   ├── /api/          → Express API
+   ├── /socket.io/    → API (realtime)
+   └── /onlyoffice/   → OnlyOffice Document Server
+                           │
+              Express ─────┼──► PostgreSQL (Prisma)
+                           ├──► Redis (BullMQ trash purge)
+                           └──► local disk (StorageService)
 ```
 
 | Piece | Choice |
 |-------|--------|
-| API | Node.js + TypeScript + Express |
+| API | Node.js + TypeScript + Express (mounted under `/api`) |
 | DB | PostgreSQL + Prisma migrations |
+| Queue | Redis + BullMQ (permanent delete) |
 | Files | Local disk behind a `StorageService` interface (swappable to S3/MinIO later) |
-| Auth | Email/password, httpOnly JWT cookie |
-| UI | React + Vite |
+| Preview | OnlyOffice Document Server |
+| Auth | Email/password, httpOnly JWT cookie (`Secure` when `NODE_ENV=production`) |
+| UI | React + Vite (served by nginx in the web image) |
+| Deploy | Docker Compose + nginx gateway |
 
 Key folders:
 
 - `api/src/routes` — HTTP handlers
-- `api/src/services/access.ts` — authorization helpers
+- `api/src/services` — access, audit, storage settings, seed
 - `api/src/storage` — storage abstraction
 - `api/prisma` — schema + migrations
-- `web/src` — UI flows
+- `web/src` — UI
+- `nginx/` — gateway configs mounted by compose
+- `docker-compose.*.yml` — full stacks (local / ssl / certbot)
+
+SPA paths such as `/users` and `/settings` must not collide with the API. The API lives under **`/api/`**; nginx sends only `/api/` (and `/socket.io/`) to Express.
 
 ## Assumptions and decisions
 
-The brief left several product gaps open. Choices below are what a small product team would reasonably ship for v1.
-
 ### Sharing: two modes
 
-1. **Inside the team (workspace)** — members see documents while logged in. No share link required.
-2. **Outside the team** — create a **public share link**, copy it, send via Gmail/Slack/etc. Recipients **do not need an account or login**. Optional password + optional expiry.
+1. **Internal** — share a document with one or more platform users (searchable picker). Recipients see it under Shared with me while logged in.
+2. **External** — public share link (copy URL). Optional password and expiry. Recipients do **not** need an account.
 
-We do **not** send email from the app (no SMTP). The product creates URLs; humans distribute them.
+The app does **not** require SMTP for the happy path; links can be copied. Optional email sending exists when SMTP settings are configured in Settings.
 
-### Workspaces and roles
+### Platform vs workspace roles
 
-- `owner` — full control (invite, manage, delete docs)
-- `admin` — invite/remove-capable for invites; manage docs/links
-- `member` — upload, list, download, create share links; can delete own uploads; owner/admin can delete any workspace doc
+**Platform** (`admin` / `owner` / `member`): who can manage users and see global admin surfaces.
 
-### Invitations
+**Workspace** (`owner` / `admin` / `member`): invite, permissions, and document control inside a workspace.
 
-- Owner/admin invites by email + role → invite URL.
-- Existing user: open invite link while logged in as that email → Accept.
-- New user: register with invite token (or register then accept) → membership created.
-- Invites expire in **7 days**; can be revoked. Invite URLs are logged to the API console for local demo.
+### Documents and folders
 
-### Documents
-
-- Personal library (no workspace) **or** exactly one workspace.
-- Soft-delete (`deletedAt`); active share links are revoked on delete.
+- Documents live in a workspace (folders supported).
+- Soft-delete → Trash; permanent delete is queued (Redis/BullMQ) with realtime toast on completion.
 - Max upload **25 MB**; common office/PDF/image MIME types.
-- Blobs never stored in Postgres — only metadata + `storageKey`.
+- Blobs are not stored in Postgres — metadata + `storageKey` only.
 
-### Share links
+### Preview and activity
 
-- Token = `crypto.randomBytes(32)` base64url (not guessable).
-- Downloads always go through the API (storage paths never exposed).
-- **Product improvement:** optional password on a share link (bcrypt). After unlock, an httpOnly cookie allows download for 1 hour.
+- Office/PDF preview via OnlyOffice (included in compose).
+- Per-document **Audit trail** (access-gated).
+- Dashboard **Recent activity** is role-scoped: platform admin sees all; owner/member see their own actions plus events in workspaces they can access.
+
+### Auth bootstrap
+
+- Admin is seeded on API startup.
+- `POST /api/auth/register` returns an error directing users to ask an admin.
 
 ## Security considerations
 
 **Addressed**
 
 - Password hashing (bcrypt)
-- httpOnly, SameSite=Lax auth cookies
+- httpOnly, SameSite=Lax auth cookies (`Secure` in production)
 - Non-guessable share tokens
-- Authz checks on every document access (personal owner / workspace membership)
+- Authz on document access (workspace membership / personal owner / share token)
 - Storage behind API; path traversal guarded in local storage
 - Upload size + MIME allowlist
-- Soft-delete + link revoke
+- Soft-delete + link revoke; trash permanent-delete queue
+- Public registration disabled; admin-provisioned users
+- API namespaced under `/api` behind the gateway
 
 **Knowingly left for later**
 
-- Outbound email
 - Virus scanning
-- Rate limiting / brute-force protection on share passwords
+- Rate limiting / brute-force protection on login and share passwords
 - CSRF tokens (mitigated somewhat by SameSite cookies)
-- Hard-delete garbage collection of files on disk
 - SSO / OAuth
-- Full audit trail
-- `docker-compose up` for the whole stack (deferred until core is stable)
+- Object storage (S3/MinIO) backend for `StorageService`
 
 ## Product improvement
 
-**Password-protected share links** — built end-to-end (API + UI + tests).
-
-Why: external sharing is the highest-risk flow; a simple password is a realistic control users ask for, without forcing outsiders to create accounts. It’s small enough to ship in a weekend and easy to demo.
+**Password-protected share links** — built end-to-end (API + UI + tests). External sharing is the highest-risk flow; a link password is a realistic control without forcing outsiders to create accounts.
 
 ## How I worked with the coding agent
 
@@ -193,36 +161,41 @@ Why: external sharing is the highest-risk flow; a simple password is a realistic
 
 **Delegated**
 
-- Scaffolding Express/Prisma/React boilerplate
+- Scaffolding Express/Prisma/React and Docker/nginx wiring
 - Implementing routes, schema, and UI from an agreed product plan
-- Writing integration tests for authz / share / invite
+- Integration tests for authz / share / invite
+- Reusable UI pieces (e.g. searchable dropdown) and activity scoping
 
 **Where I steered / corrected**
 
-- Locked Express + Postgres (not Fastify) and deferred full Dockerization on purpose
-- Chose copy-link + public access (no login) for outsiders instead of forcing signup
+- Locked Express + Postgres and shipped a full Docker Compose stack
+- Chose copy-link + public access for outsiders (optional password) instead of forcing signup
 - Required a storage abstraction instead of writing files ad hoc in handlers
-- Kept authorization in a shared access module rather than sprinkling checks only in the UI
+- Kept authorization in a shared access module
+- Mounted the API under `/api` so browser routes and the gateway do not collide
 
 **What I’d watch in review**
 
-- Every document download path goes through `requireDocumentAccess` or a validated share token
-- Share tokens and invite tokens are random, not sequential IDs
-- README decisions match the code (especially “no email” and “no login for public links”)
+- Every document download path goes through access checks or a validated share token
+- Share and invite tokens are random, not sequential IDs
+- README decisions match the code (especially admin seed and `/api` routing)
 
 ## What I’d do with more time
 
-1. `docker-compose.yml` (Postgres + API + web) and optional MinIO `StorageService`
-2. Hard-delete job for soft-deleted files
-3. Rate limits on auth + share unlock
-4. Folders / search within a workspace
-5. Audit log of downloads and membership changes
+1. MinIO / S3 `StorageService` implementation
+2. Rate limits on auth and share unlock
+3. Outbound email polish and delivery monitoring
+4. Virus scanning on upload
+5. CSRF hardening beyond SameSite cookies
 
 ## API sketch
 
-- `POST /api/auth/register|login|logout`, `GET /api/auth/me`
-- `GET/POST /api/documents`, `GET /api/documents/:id/download`, `DELETE /api/documents/:id`
-- `POST /api/documents/:id/share-links`, `DELETE /api/documents/share-links/:linkId`
-- `GET/POST /api/workspaces`, members + invitations
+- `POST /api/auth/login|logout`, `GET /api/auth/me` (public register disabled)
+- `GET/POST /api/users` (admin), platform role / disable / enable
+- `GET /api/dashboard` (stats + scoped recent activity)
+- `GET/POST /api/documents`, download, OnlyOffice, share-links
+- `GET/POST /api/workspaces`, members, invitations, folders, contents
+- `GET/POST /api/shares/...` (internal / external / mine / with-me)
+- `GET /api/audit-trails/documents/:id`
 - `GET /api/invites/:token`, `POST /api/invites/:token/accept`
 - `GET /api/s/:token`, `POST /api/s/:token/unlock`, `GET /api/s/:token/download`
