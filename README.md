@@ -133,8 +133,6 @@ The app does **not** require SMTP for the happy path; links can be copied. Optio
 
 ## Security considerations
 
-**Addressed**
-
 - Password hashing (bcrypt)
 - httpOnly, SameSite=Lax auth cookies (`Secure` in production)
 - Non-guessable share tokens
@@ -144,14 +142,6 @@ The app does **not** require SMTP for the happy path; links can be copied. Optio
 - Soft-delete + link revoke; trash permanent-delete queue
 - Public registration disabled; admin-provisioned users
 - API namespaced under `/api` behind the gateway
-
-**Knowingly left for later**
-
-- Virus scanning
-- Rate limiting / brute-force protection on login and share passwords
-- CSRF tokens (mitigated somewhat by SameSite cookies)
-- SSO / OAuth
-- Object storage (S3/MinIO) backend for `StorageService`
 
 ## Product improvement
 
@@ -181,14 +171,6 @@ The app does **not** require SMTP for the happy path; links can be copied. Optio
 - Every document download path goes through access checks or a validated share token
 - Share and invite tokens are random, not sequential IDs
 - README decisions match the code (especially admin seed and `/api` routing)
-
-## What I’d do with more time
-
-1. MinIO / S3 `StorageService` implementation
-2. Rate limits on auth and share unlock
-3. Outbound email polish and delivery monitoring
-4. Virus scanning on upload
-5. CSRF hardening beyond SameSite cookies
 
 ## API sketch
 
